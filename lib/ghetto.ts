@@ -17,6 +17,30 @@ export function initGhetto() {
 
   const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>[...c.querySelectorAll(s)];
 
+  // ---- on-screen keyboard: never leave the page shifted up after the keyboard closes ----
+  // Focusing an input makes mobile browsers scroll the page / overlays to reveal it; when the keyboard is
+  // dismissed that scroll can stay behind. Put everything back to the top-left once the keyboard goes away.
+  const SHIFTABLE='.app,.detail,.rdetail,.sheet,.bsheet,.bs-card,.viewer,.shell';
+  function unshift(){
+    window.scrollTo(0,0);
+    document.documentElement.scrollTop=0;document.body.scrollTop=0;
+    $$(SHIFTABLE).forEach(el=>{if(el.scrollTop)el.scrollTop=0;if(el.scrollLeft)el.scrollLeft=0});
+  }
+  const isField=el=>!!el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA');
+  document.addEventListener('focusout',e=>{
+    if(isField(e.target)){[0,120,350,700].forEach(ms=>setTimeout(()=>{if(!isField(document.activeElement))unshift()},ms))}
+  });
+  if(window.visualViewport){
+    const vv=window.visualViewport;
+    let last=vv.height;
+    vv.addEventListener('resize',()=>{
+      // keyboard closed (viewport grew back) or the browser moved the layout: realign
+      if(vv.height>last+40||!isField(document.activeElement))unshift();
+      last=vv.height;
+    });
+    vv.addEventListener('scroll',()=>{if(!isField(document.activeElement))unshift()});
+  }
+
   // hide images that fail to load (the card keeps its gradient background instead of a broken icon)
   const hideImg=(img)=>{img.style.display='none'};
   document.addEventListener('error',e=>{if(e.target&&e.target.tagName==='IMG')hideImg(e.target)},true);
