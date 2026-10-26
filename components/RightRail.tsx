@@ -12,6 +12,12 @@ export default function RightRail() {
         <div id="rcHead"></div>
         <div className="rc-scroll" id="rcScroll"></div>
       </div>
+      <div className="r-rooms" id="rRooms">
+        <div id="rfHost"></div>
+        <section className="r-card" id="rSaved"></section>
+        <section className="r-card r-tip"><h3><i className="fa-solid fa-shield-halved"></i>Stay safe</h3><p>Always visit a room and meet the landlord before you pay. Ghetto never asks you for money in chat.</p></section>
+      </div>
+      <div className="r-room" id="rRoom"></div>
     </aside>
   );
 }

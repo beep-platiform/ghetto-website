@@ -12,7 +12,6 @@ export default function NotificationsSheet() {
         <button type="button" className="tab" data-tab="unread">Unread<span className="tc" id="nUnreadCount"></span></button>
       </div>
       <div className="sh-body" id="nBody"></div>
-      <button className="sh-grab" aria-label="Close"><span></span></button>
     </section>
   );
 }

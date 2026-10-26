@@ -16,7 +16,6 @@ export default function SearchSheet() {
         <button type="button" className="tab" data-tab="rooms">Rooms<span className="tc"></span></button>
       </div>
       <div className="sh-body" id="sBody"></div>
-      <button className="sh-grab" aria-label="Close"><span></span></button>
     </section>
   );
 }

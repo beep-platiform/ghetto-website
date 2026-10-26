@@ -9,6 +9,7 @@ import { ORDER, STORIES } from '../data/stories';
 import { AV, POOL, PEOPLE, TREND } from '../data/people';
 import { COMMENTS } from '../data/comments';
 import { NOTIFS, ICON } from '../data/notifications';
+import { RFAC, RTYPES, RTYPE, RLL, ROOMS, REVIEWS } from '../data/rooms';
 
 export function initGhetto() {
   if (typeof window === 'undefined' || window.__ghettoReady) return;
@@ -74,8 +75,9 @@ export function initGhetto() {
 
   // nav
   $$('.nav-item').forEach(b=>b.addEventListener('click',()=>{
-    $$('.nav-item').forEach(x=>x.classList.remove('active'));b.classList.add('active');
-    const l=b.textContent.trim();if(l!=='Home')showToast(l+' page coming soon 🚧');
+    const l=b.textContent.trim();
+    if(l==='Home'||l==='Rooms'){const pg=l.toLowerCase();setPage(pg);try{history.pushState(null,'',pg==='rooms'?'/rooms':'/')}catch(e){}}
+    else showToast(l+' page coming soon 🚧');
   }));
 
   // fab
@@ -406,12 +408,6 @@ export function initGhetto() {
   function closeSheets(){sheets.forEach(closeOne);sInput.blur()}
   function openSheet(sh){sheets.forEach(x=>{if(x!==sh)closeOne(x)});sh.classList.add('open');sh.setAttribute('aria-hidden','false')}
   $$('[data-close]').forEach(b=>b.addEventListener('click',closeSheets));
-  $$('.sh-grab').forEach(g=>{
-    let y0=0;
-    g.addEventListener('pointerdown',e=>{y0=e.clientY});
-    g.addEventListener('pointerup',e=>{if(y0-e.clientY>25)closeSheets()});
-    g.addEventListener('click',closeSheets);
-  });
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'&&!viewer.classList.contains('open')&&!detail.classList.contains('open'))closeSheets();
   });
@@ -478,17 +474,19 @@ export function initGhetto() {
     const people=PEOPLE.filter(p=>hit(p.n+' '+p.r+' '+p.s));
     const posts=postItems().filter(p=>hit(p.title+' '+p.copy+' '+p.name+' '+p.meta));
     const rooms=posts.filter(p=>/room|house|rent|landlord/i.test(p.title+' '+p.copy+' '+p.role));
+    const rrooms=ROOMS.filter(r=>hit(r.title+' '+r.area+' '+RTYPE[r.type]+' '+r.fac.map(f=>RFAC[f][0]).join(' ')+' '+r.ll.name));
     $$('#sTabs .tab').forEach(tb=>{
-      const k=tb.dataset.tab,n=k==='people'?people.length:k==='posts'?posts.length:k==='rooms'?rooms.length:null;
+      const k=tb.dataset.tab,n=k==='people'?people.length:k==='posts'?posts.length:k==='rooms'?(rrooms.length+rooms.length):null;
       $('.tc',tb).textContent=n==null?'':n;tb.classList.toggle('on',k===sTab);
     });
     let h='';
     if(sTab==='all'){
       if(people.length)h+=sec('People')+people.slice(0,3).map(personHTML).join('');
+      if(rrooms.length)h+=sec('Rooms')+rrooms.slice(0,3).map(roomRowHTML).join('');
       if(posts.length)h+=sec('Posts')+posts.map(postRowHTML).join('');
     }else if(sTab==='people')h=people.map(personHTML).join('');
     else if(sTab==='posts')h=posts.map(postRowHTML).join('');
-    else h=rooms.map(postRowHTML).join('');
+    else h=rrooms.map(roomRowHTML).join('')+(rooms.length?sec('Posts about rooms')+rooms.map(postRowHTML).join(''):'');
     if(!h)h='<div class="d-empty"><div class="s-emoji">🔍</div>No results for “'+esc(raw)+'”<small>Try another keyword or check the spelling.</small></div>';
     sBody.innerHTML=h;
   }
@@ -518,6 +516,8 @@ export function initGhetto() {
     if(q){sInput.value=q.dataset.q;sTab='all';renderSearch();sInput.focus();return}
     const pr=e.target.closest('.sr-person');
     if(pr){showToast("Opening "+pr.dataset.name+"'s profile 👤");return}
+    const rr=e.target.closest('.sr-room');
+    if(rr){saveRecent(sInput.value);openRoom(rr.dataset.room);return}
     const po=e.target.closest('.sr-post');
     if(po){
       saveRecent(sInput.value);
@@ -624,8 +624,10 @@ export function initGhetto() {
   });
   // wheel over the side columns scrolls the feed (like X)
   ['side','rail'].forEach(id=>$('#'+id).addEventListener('wheel',e=>{
-    if(e.currentTarget.classList.contains('comments-mode'))return;
-    (detail.classList.contains('open')?dScroll:$('#scroll')).scrollTop+=e.deltaY;
+    const el=e.currentTarget;
+    if(el.id==='rail'&&(el.classList.contains('comments-mode')||el.scrollHeight>el.clientHeight+2))return;
+    const target=roomDetail.classList.contains('open')?$('#rdScroll'):detail.classList.contains('open')?dScroll:curPage==='rooms'?$('#rmScroll'):$('#scroll');
+    target.scrollTop+=e.deltaY;
   },{passive:true}));
   // desktop: clicking the dimmed area closes the story
   document.addEventListener('click',e=>{
@@ -674,6 +676,7 @@ export function initGhetto() {
       dScroll.appendChild(head);dScroll.appendChild(list);dScroll.appendChild(end);detail.appendChild(comp);
     }
     rail.classList.toggle('comments-mode',toRail);
+    updateRail();
   }
   function scrollToComments(){
     if(isWide())$('#rcScroll').scrollTo({top:0,behavior:'smooth'});
@@ -683,4 +686,312 @@ export function initGhetto() {
     if(wideMQ.addEventListener)wideMQ.addEventListener('change',layoutComments);
     else if(wideMQ.addListener)wideMQ.addListener(layoutComments);
   }
+
+  // =====================================================================
+  // ROOMS
+  // =====================================================================
+  const appEl=$('.app'),roomDetail=$('#roomDetail'),filterSheet=$('#filterSheet'),contactSheet=$('#contactSheet');
+  let curPage=(document.querySelector('.app')||{dataset:{}}).dataset.page||'home',curRoom=null;
+  const TODAY='2026-10-24';
+  const rfmt=n=>n.toLocaleString('en-US');
+  const rk=n=>n>=1000?(n/1000)+'k':String(n);
+  const dlabel=iso=>new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const rimg=(id,w,h)=>'https://images.unsplash.com/'+id+'?w='+w+'&h='+h+'&fit=crop';
+  const availTxt=r=>r.from<=TODAY?'Available now':'From '+dlabel(r.from);
+  const F={q:'',type:'all',min:0,max:300000,fac:new Set(),ver:false,date:'',sort:'rec',savedOnly:false};
+  let saved=new Set();
+  try{saved=new Set(JSON.parse(localStorage.getItem('ghettoSavedRooms')||'[]'))}catch(e){}
+  const persistSaved=()=>{try{localStorage.setItem('ghettoSavedRooms',JSON.stringify([...saved]))}catch(e){}};
+  const advCount=()=>((F.min>0||F.max<300000)?1:0)+F.fac.size+(F.ver?1:0)+(F.date?1:0);
+  const filtersActive=()=>!!(F.q||F.type!=='all'||F.min>0||F.max<300000||F.fac.size||F.ver||F.date||F.savedOnly);
+
+  function filtered(){
+    const toks=F.q.toLowerCase().split(/\s+/).filter(Boolean);
+    const list=ROOMS.filter(r=>{
+      if(F.type!=='all'&&r.type!==F.type)return false;
+      if(r.price<F.min||r.price>F.max)return false;
+      for(const f of F.fac)if(r.fac.indexOf(f)<0)return false;
+      if(F.ver&&!r.ll.ver)return false;
+      if(F.date&&r.from>F.date)return false;
+      if(F.savedOnly&&!saved.has(r.id))return false;
+      if(toks.length){
+        const hay=(r.title+' '+r.area+' '+RTYPE[r.type]+' '+r.fac.map(f=>RFAC[f][0]).join(' ')+' '+r.ll.name).toLowerCase();
+        if(!toks.every(x=>hay.indexOf(x)>-1))return false;
+      }
+      return true;
+    });
+    if(F.sort==='low')list.sort((a,b)=>a.price-b.price);
+    else if(F.sort==='high')list.sort((a,b)=>b.price-a.price);
+    else if(F.sort==='near')list.sort((a,b)=>a.km-b.km);
+    return list;
+  }
+
+  // ---- card builders ----
+  function heartBtn(r){const on=saved.has(r.id);return '<button type="button" class="rc-heart'+(on?' on':'')+'" data-heart="'+r.id+'" aria-label="Save room"><i class="'+(on?'fa-solid':'fa-regular')+' fa-heart"></i></button>'}
+  function availPill(r){const now=r.from<=TODAY;return '<span class="pill '+(now?'now':'soon')+'"><i class="fa-solid '+(now?'fa-circle-check':'fa-calendar-days')+'"></i>'+availTxt(r)+'</span>'}
+  function cardHTML(r,i,anim){
+    return '<article class="rcard'+(anim?'':' na')+'" data-room="'+r.id+'" style="--i:'+i+'">'+
+      '<div class="rc-media"><img src="'+rimg(r.photos[0],640,480)+'" alt="'+esc(r.title)+'" loading="lazy" onerror="this.remove()">'+
+      '<div class="rc-top">'+availPill(r)+heartBtn(r)+'</div><span class="rc-count"><i class="fa-solid fa-camera"></i>'+r.photos.length+'</span></div>'+
+      '<div class="rc-body"><h3 class="rc-title">'+esc(r.title)+'</h3>'+
+      '<div class="rc-loc"><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+' · '+r.km+' km from campus</div>'+
+      '<div class="rc-fac">'+r.fac.slice(0,4).map(f=>'<span title="'+RFAC[f][0]+'"><i class="fa-solid '+RFAC[f][1]+'"></i></span>').join('')+
+      (r.ll.ver?'<em class="ver"><i class="fa-solid fa-circle-check"></i>Verified</em>':'')+'</div>'+
+      '<div class="rc-foot"><div class="rc-price"><b>'+rfmt(r.price)+' RWF</b><small>/ month</small></div>'+
+      '<div class="rc-rate"><i class="fa-solid fa-star"></i>'+r.rate+'<small>('+r.rev+')</small></div></div></div></article>';
+  }
+  function featHTML(r,cls){
+    return '<article class="fcard'+(cls||'')+'" data-room="'+r.id+'"><img src="'+rimg(r.photos[0],600,420)+'" alt="" loading="lazy" onerror="this.remove()">'+
+      '<div class="fc-top">'+availPill(r)+heartBtn(r)+'</div><div class="fc-info"><b>'+esc(r.title)+'</b>'+
+      '<span><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+'</span><strong>'+rfmt(r.price)+' RWF <small>/ month</small></strong></div></article>';
+  }
+  function roomRowHTML(r){
+    return '<div class="sr-post sr-room" data-room="'+r.id+'"><div class="sr-thumb"><img src="'+rimg(r.photos[0],160,160)+'" alt="" onerror="this.remove()"></div>'+
+      '<div class="sr-main"><b>'+hl(r.title,TOK)+'</b><p>'+hl(RTYPE[r.type]+' · '+r.area+' · '+rfmt(r.price)+' RWF / month',TOK)+'</p><small>'+esc(r.ll.name)+' · '+availTxt(r)+'</small></div></div>';
+  }
+
+  // ---- list page ----
+  function renderChips(){
+    $('#rmChips').innerHTML=RTYPES.map(tp=>'<button type="button" class="rm-chip'+(!F.savedOnly&&F.type===tp[0]?' on':'')+'" data-type="'+tp[0]+'"><i class="fa-solid '+tp[2]+'"></i>'+tp[1]+'</button>').join('')+
+      '<button type="button" class="rm-chip'+(F.savedOnly?' on':'')+'" data-saved="1"><i class="'+(F.savedOnly?'fa-solid':'fa-regular')+' fa-heart"></i>Saved'+(saved.size?'<span class="n">'+saved.size+'</span>':'')+'</button>';
+  }
+  function activeChips(){
+    const a=[];
+    if(F.q)a.push(['q','“'+F.q+'”']);
+    if(F.type!=='all')a.push(['type',RTYPE[F.type]]);
+    if(F.min>0&&F.max<300000)a.push(['price',rk(F.min)+' – '+rk(F.max)+' RWF']);
+    else if(F.max<300000)a.push(['price','Under '+rk(F.max)+' RWF']);
+    else if(F.min>0)a.push(['price','From '+rk(F.min)+' RWF']);
+    F.fac.forEach(f=>a.push(['fac:'+f,RFAC[f][0]]));
+    if(F.ver)a.push(['ver','Verified only']);
+    if(F.date)a.push(['date','Move in by '+dlabel(F.date)]);
+    if(F.savedOnly)a.push(['saved','Saved only']);
+    return a;
+  }
+  function syncPanel(n){
+    $('#pMinR').value=F.min;$('#pMaxR').value=F.max;
+    $('#pMinTxt').textContent=rfmt(F.min);$('#pMaxTxt').textContent=F.max>=300000?'300,000+':rfmt(F.max);
+    const fl=$('#dFill');fl.style.left=(F.min/3000)+'%';fl.style.right=(100-F.max/3000)+'%';
+    $('#pMinR').style.zIndex=F.min>150000?4:2;$('#pMaxR').style.zIndex=3;
+    $('#fpTypes').innerHTML=RTYPES.map(tp=>'<button type="button" class="fp-chip'+(F.type===tp[0]?' on':'')+'" data-type="'+tp[0]+'">'+tp[1]+'</button>').join('');
+    $('#fpFac').innerHTML=Object.keys(RFAC).map(k=>'<button type="button" class="ft'+(F.fac.has(k)?' on':'')+'" data-fac="'+k+'"><i class="fa-solid '+RFAC[k][1]+'"></i>'+RFAC[k][0]+'</button>').join('');
+    const dv=$('#fpDate');if(dv.value!==F.date)dv.value=F.date;
+    const sw=$('#fpVerified');sw.classList.toggle('on',F.ver);sw.setAttribute('aria-checked',String(F.ver));
+    $('#fpApply').textContent=n===0?'No rooms match':'Show '+n+' room'+(n===1?'':'s');
+    $$('.fp-presets button').forEach(b=>b.classList.toggle('on',+b.dataset.min===F.min&&+b.dataset.max===F.max));
+  }
+  function renderSaved(){
+    const items=ROOMS.filter(r=>saved.has(r.id));
+    $('#rSaved').innerHTML='<h3>Saved rooms'+(items.length?'<span class="cnt">'+items.length+'</span>':'')+'</h3>'+
+      (items.length?items.map(r=>'<div class="sv" data-room="'+r.id+'"><div class="sv-img"><img src="'+rimg(r.photos[0],120,120)+'" alt="" onerror="this.remove()"></div>'+
+        '<div class="sv-t"><b>'+esc(r.title)+'</b><small>'+rfmt(r.price)+' RWF / month · '+esc(r.area)+'</small></div><i class="fa-solid fa-chevron-right"></i></div>').join('')
+        :'<p class="sv-empty">Tap the <i class="fa-regular fa-heart"></i> on any room to keep it here.</p>');
+  }
+  function renderRooms(anim){
+    if(anim===undefined)anim=true;
+    const list=filtered(),active=filtersActive();
+    renderChips();
+    $('#rmFeatWrap').hidden=active;
+    if(!active&&!$('#rmFeat').children.length)$('#rmFeat').innerHTML=ROOMS.slice().sort((a,b)=>b.rate-a.rate||a.km-b.km).slice(0,4).map(r=>featHTML(r)).join('');
+    $('#rmCount').innerHTML='<b>'+list.length+'</b> '+(list.length===1?'room':'rooms')+' <small>near Nyabugogo</small>';
+    const ac=activeChips();
+    $('#rmActive').innerHTML=ac.length?ac.map(c=>'<span class="af">'+esc(c[1])+'<button type="button" data-k="'+esc(c[0])+'" aria-label="Remove filter"><i class="fa-solid fa-xmark"></i></button></span>').join('')+'<button type="button" class="af-clear">Clear all</button>':'';
+    $('#rmGrid').innerHTML=list.map((r,i)=>cardHTML(r,i,anim)).join('');
+    $('#rmEmpty').hidden=list.length>0;
+    $('.rm-end').hidden=list.length===0;
+    const n=advCount(),b=$('#rmFilterCount');b.textContent=n||'';b.style.display=n?'grid':'none';
+    $('#rmSearchClear').style.display=F.q?'grid':'none';
+    syncPanel(list.length);renderSaved();
+  }
+  function clearKey(k){
+    if(k==='q'){F.q='';$('#rmSearch').value=''}
+    else if(k==='type')F.type='all';
+    else if(k==='price'){F.min=0;F.max=300000}
+    else if(k.indexOf('fac:')===0)F.fac.delete(k.slice(4));
+    else if(k==='ver')F.ver=false;
+    else if(k==='date')F.date='';
+    else if(k==='saved')F.savedOnly=false;
+  }
+  function resetPanel(){F.type='all';F.min=0;F.max=300000;F.fac.clear();F.ver=false;F.date='';F.savedOnly=false}
+  function resetAll(){resetPanel();F.q='';$('#rmSearch').value=''}
+
+  // ---- saving ----
+  function syncHearts(id){
+    const on=saved.has(id);
+    $$('[data-heart="'+id+'"]').forEach(b=>{b.classList.toggle('on',on);const ic=$('i',b);if(ic)ic.className=(on?'fa-solid':'fa-regular')+' fa-heart'});
+  }
+  function toggleSave(id,btn){
+    const on=!saved.has(id);on?saved.add(id):saved.delete(id);persistSaved();
+    syncHearts(id);renderChips();renderSaved();
+    if(on){const el=btn||$('[data-heart="'+id+'"]');if(el){const r=el.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}}
+    showToast(on?'Saved to your rooms ❤️':'Removed from saved');
+    if(F.savedOnly&&curPage==='rooms')renderRooms(false);
+  }
+  const heartClick=e=>{const h=e.target.closest('[data-heart]');if(h){e.stopPropagation();toggleSave(h.dataset.heart,h);return true}return false};
+
+  // ---- pages + right column ----
+  function updateRail(){
+    const rail=$('#rail'),wide=isWide();
+    const comments=wide&&detail.classList.contains('open');
+    const room=wide&&!comments&&roomDetail.classList.contains('open');
+    const rooms=wide&&!comments&&!room&&curPage==='rooms';
+    rail.classList.toggle('comments-mode',comments);
+    rail.classList.toggle('room-mode',room);
+    rail.classList.toggle('rooms-mode',rooms);
+    const host=(wide&&curPage==='rooms')?$('#rfHost'):$('#fsBody'),fp=$('#filterPanel');
+    if(fp.parentNode!==host)host.appendChild(fp);
+    if(wide)closeBSheet(filterSheet);
+  }
+  function openBSheet(s){s.classList.add('open');s.setAttribute('aria-hidden','false')}
+  function closeBSheet(s){s.classList.remove('open');s.setAttribute('aria-hidden','true')}
+  function setPage(pg){
+    curPage=pg;appEl.dataset.page=pg;
+    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);
+    if(detail.classList.contains('open'))closePost();
+    if(roomDetail.classList.contains('open'))closeRoom();
+    $$('.nav-item').forEach(n=>n.classList.toggle('active',n.textContent.trim().toLowerCase()===pg));
+    syncSide();
+    if(pg==='rooms'){renderRooms(true);$('#rmScroll').scrollTop=0}
+    updateRail();
+  }
+
+  // ---- room detail ----
+  function stars(n){let s='';for(let i=0;i<5;i++)s+='<i class="fa-'+(i<n?'solid':'regular')+' fa-star"></i>';return s}
+  function buildRoom(r){
+    const ll=r.ll,idx=ROOMS.indexOf(r);
+    const gal='<div class="rd-gal-wrap"><div class="rd-gal" id="rdGal">'+r.photos.map(id=>'<div class="g-slide"><img src="'+rimg(id,1000,760)+'" alt="'+esc(r.title)+'" onerror="this.remove()"></div>').join('')+'</div>'+
+      '<span class="rd-avail">'+availPill(r)+'</span><span class="g-count" id="rdCount">1/'+r.photos.length+'</span>'+
+      (r.photos.length>1?'<button class="g-nav prev" data-d="p" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button class="g-nav next" data-d="n" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button><div class="g-dots" id="rdDots">'+r.photos.map((_,k)=>'<i class="'+(k?'':'on')+'"></i>').join('')+'</div>':'')+'</div>';
+    const facts=[['Type',RTYPE[r.type]],['Bedrooms',r.beds],['Bathroom',r.bath],['Available',availTxt(r)],['Deposit',r.dep],['Minimum stay',r.min]];
+    const revs=[REVIEWS[idx%3],REVIEWS[(idx+1)%3]];
+    const sim=ROOMS.filter(x=>x.id!==r.id&&(x.type===r.type||x.area===r.area)).slice(0,4);
+    $('#rdBody').innerHTML=gal+'<div class="rd-pad">'+
+      '<div class="rd-tags"><span class="tag">'+RTYPE[r.type]+'</span>'+(ll.ver?'<span class="tag green">Verified landlord</span>':'')+'</div>'+
+      '<h1 class="rd-title">'+esc(r.title)+'</h1>'+
+      '<div class="rd-price"><b>'+rfmt(r.price)+' RWF</b><small>/ month</small></div>'+
+      '<div class="rd-loc"><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+' · '+r.km+' km from campus<span class="rd-rate"><i class="fa-solid fa-star"></i>'+r.rate+'<small>('+r.rev+' reviews)</small></span></div>'+
+      '<h3 class="rd-h">What\'s included</h3><div class="rd-amen">'+r.fac.map(f=>'<div class="am"><i class="fa-solid '+RFAC[f][1]+'"></i>'+RFAC[f][0]+'</div>').join('')+'</div>'+
+      '<h3 class="rd-h">About this room</h3><p class="rd-about">'+esc(r.about)+'</p>'+
+      '<div class="rd-facts">'+facts.map(f=>'<div class="fact"><small>'+f[0]+'</small><b>'+esc(String(f[1]))+'</b></div>').join('')+'</div>'+
+      '<div class="rd-ll"><div class="avatar"><img src="'+FACE(AV[ll.av])+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b>'+
+        '<small>'+(ll.ver?'<span class="ok">Verified Landlord</span> · ':'')+'Joined '+ll.joined+'</small><small>Replies '+ll.reply+'</small></div>'+
+        '<button class="btn-ghost rd-msg">Message</button></div>'+
+      '<h3 class="rd-h">Gallery</h3><div class="rd-thumbs">'+r.photos.slice(0,4).map((id,k)=>'<div class="th" data-i="'+k+'"><img src="'+rimg(id,240,240)+'" alt="" onerror="this.remove()">'+(k===3&&r.photos.length>4?'<span class="more">+'+(r.photos.length-4)+'</span>':'')+'</div>').join('')+'</div>'+
+      '<h3 class="rd-h">Location</h3><div class="rd-map"><span class="rd-pin-ring"></span><i class="fa-solid fa-location-dot rd-pin"></i>'+
+        '<a class="rd-open" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.area+' Kigali Rwanda')+'"><i class="fa-solid fa-map-location-dot"></i>Open in Maps</a></div>'+
+      '<h3 class="rd-h">Reviews</h3><div class="rd-revs">'+revs.map(v=>'<div class="rev"><div class="rev-h"><div class="avatar"><img src="'+FACE(AV[v[1]])+'" alt="" onerror="this.remove()"></div><div><b>'+v[0]+'</b><small>'+v[4]+'</small></div><span class="rev-st">'+stars(v[3])+'</span></div><p>'+esc(v[2])+'</p></div>').join('')+'</div>'+
+      (sim.length?'<h3 class="rd-h">Similar rooms</h3><div class="rm-feat rd-sim">'+sim.map(x=>featHTML(x,' sm')).join('')+'</div>':'')+
+      '</div>';
+    $('#rdTitleTop').textContent=r.title;
+    $('#rdSave').dataset.heart=r.id;syncHearts(r.id);
+    $('#rdCtaPrice').innerHTML='<b>'+rfmt(r.price)+' RWF</b><small>per month</small>';
+    $('#rRoom').innerHTML='<div class="rr"><div class="rr-price"><b>'+rfmt(r.price)+' RWF</b><small>/ month</small></div>'+
+      '<div class="rr-meta">'+availPill(r)+'<span class="rc-rate"><i class="fa-solid fa-star"></i>'+r.rate+'<small>('+r.rev+')</small></span></div>'+
+      '<div class="rr-field"><label for="rrDate">Planned move-in date</label><label class="fp-date"><i class="fa-regular fa-calendar"></i><input type="date" id="rrDate" min="'+TODAY+'" value="'+(r.from>TODAY?r.from:TODAY)+'"></label></div>'+
+      '<button type="button" class="rr-btn primary rr-visit"><i class="fa-solid fa-calendar-check"></i>Request a visit</button>'+
+      '<button type="button" class="rr-btn ghost rr-contact"><i class="fa-regular fa-comment-dots"></i>Message landlord</button>'+
+      '<div class="rr-ll"><div class="avatar"><img src="'+FACE(AV[ll.av])+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>Replies '+ll.reply+'</small></div></div>'+
+      '<p class="rr-note"><i class="fa-solid fa-shield-halved"></i>Visit first. Never pay before you have seen the room and met the landlord.</p></div>'+
+      '<section class="r-card"><h3>Similar rooms</h3>'+sim.slice(0,3).map(x=>'<div class="sv" data-room="'+x.id+'"><div class="sv-img"><img src="'+rimg(x.photos[0],120,120)+'" alt="" onerror="this.remove()"></div><div class="sv-t"><b>'+esc(x.title)+'</b><small>'+rfmt(x.price)+' RWF / month · '+esc(x.area)+'</small></div><i class="fa-solid fa-chevron-right"></i></div>').join('')+'</section>';
+    const g=$('#rdGal');
+    if(g&&r.photos.length>1)g.addEventListener('scroll',()=>{
+      const k=Math.round(g.scrollLeft/g.clientWidth);
+      $('#rdCount').textContent=(k+1)+'/'+r.photos.length;
+      $$('#rdDots i').forEach((d,j)=>d.classList.toggle('on',j===k));
+    });
+  }
+  function openRoom(id){
+    const r=ROOMS.find(x=>x.id===id);if(!r)return;
+    curRoom=r;buildRoom(r);
+    roomDetail.classList.add('open');roomDetail.setAttribute('aria-hidden','false');
+    const sc=$('#rdScroll');sc.style.scrollBehavior='auto';sc.scrollTop=0;sc.style.scrollBehavior='';
+    updateRail();
+  }
+  function closeRoom(){
+    roomDetail.classList.remove('open');roomDetail.setAttribute('aria-hidden','true');
+    closeBSheet(contactSheet);updateRail();
+  }
+  function openContact(r){
+    if(!r)return;
+    $('#csAv').src=FACE(AV[r.ll.av]);
+    $('#csName').textContent='Message '+r.ll.name;
+    $('#csRoom').textContent=r.title+' · '+rfmt(r.price)+' RWF';
+    $('#csMsg').value='Hi '+r.ll.name.split(' ')[0]+', is this room still available?';
+    openBSheet(contactSheet);
+  }
+
+  // ---- events: rooms list ----
+  $('#roomsPage').addEventListener('click',e=>{
+    if(heartClick(e))return;
+    const chip=e.target.closest('.rm-chip');
+    if(chip){
+      if(chip.dataset.saved){F.savedOnly=!F.savedOnly}
+      else{F.type=chip.dataset.type;F.savedOnly=false}
+      renderRooms(true);return;
+    }
+    const af=e.target.closest('.af button');if(af){clearKey(af.dataset.k);renderRooms(false);return}
+    if(e.target.closest('.af-clear,.rm-clear')){resetAll();renderRooms(true);return}
+    const card=e.target.closest('[data-room]');if(card)openRoom(card.dataset.room);
+  });
+  $('#rmSearch').addEventListener('input',e=>{F.q=e.target.value.trim();renderRooms(false)});
+  $('#rmSearchClear').addEventListener('click',()=>{F.q='';$('#rmSearch').value='';renderRooms(false);$('#rmSearch').focus()});
+  $('#rmSort').addEventListener('change',e=>{F.sort=e.target.value;renderRooms(true)});
+  $('#rmFilterBtn').addEventListener('click',()=>openBSheet(filterSheet));
+
+  // ---- events: filter panel ----
+  const fpEl=$('#filterPanel');
+  function onPrice(e){
+    let a=+$('#pMinR').value,b=+$('#pMaxR').value;
+    if(a>b){if(e.target.id==='pMinR'){a=b}else{b=a}}
+    F.min=a;F.max=b;renderRooms(false);
+  }
+  $('#pMinR').addEventListener('input',onPrice);$('#pMaxR').addEventListener('input',onPrice);
+  fpEl.addEventListener('click',e=>{
+    const ty=e.target.closest('.fp-chip');if(ty){F.type=ty.dataset.type;F.savedOnly=false;renderRooms(false);return}
+    const fc=e.target.closest('.ft');if(fc){const k=fc.dataset.fac;F.fac.has(k)?F.fac.delete(k):F.fac.add(k);renderRooms(false);return}
+    const ps=e.target.closest('.fp-presets button');if(ps){F.min=+ps.dataset.min;F.max=+ps.dataset.max;renderRooms(false);return}
+    if(e.target.closest('#fpVerified')){F.ver=!F.ver;renderRooms(false);return}
+    if(e.target.closest('#fpReset')){resetPanel();renderRooms(false);showToast('Filters reset');return}
+    if(e.target.closest('#fpApply')){closeBSheet(filterSheet);$('#rmScroll').scrollTo({top:0,behavior:'smooth'})}
+  });
+  $('#fpDate').addEventListener('change',e=>{F.date=e.target.value;renderRooms(false)});
+  [filterSheet,contactSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
+
+  // ---- events: room detail + right column ----
+  $('#rdBack').addEventListener('click',closeRoom);
+  $('#rdShare').addEventListener('click',()=>showToast('Link copied 🔗'));
+  $('#rdSave').addEventListener('click',e=>{if(curRoom)toggleSave(curRoom.id,e.currentTarget)});
+  $('#rdContactBtn').addEventListener('click',()=>openContact(curRoom));
+  $('#rdBody').addEventListener('click',e=>{
+    if(heartClick(e))return;
+    const g=$('#rdGal'),nav=e.target.closest('.g-nav');
+    if(nav&&g){g.scrollBy({left:(nav.dataset.d==='n'?1:-1)*g.clientWidth,behavior:'smooth'});return}
+    const th=e.target.closest('.th');if(th&&g){g.scrollTo({left:(+th.dataset.i)*g.clientWidth,behavior:'smooth'});$('#rdScroll').scrollTo({top:0,behavior:'smooth'});return}
+    if(e.target.closest('.rd-msg')){openContact(curRoom);return}
+    const sim=e.target.closest('.fcard');if(sim)openRoom(sim.dataset.room);
+  });
+  $('#rRoom').addEventListener('click',e=>{
+    if(e.target.closest('.rr-contact')){openContact(curRoom);return}
+    if(e.target.closest('.rr-visit')){showToast('Visit request sent to '+curRoom.ll.name+' 📅');return}
+    const sv=e.target.closest('.sv');if(sv)openRoom(sv.dataset.room);
+  });
+  $('#rSaved').addEventListener('click',e=>{const sv=e.target.closest('.sv');if(sv)openRoom(sv.dataset.room)});
+
+  // ---- events: contact sheet ----
+  $('.cs-quick').addEventListener('click',e=>{const b=e.target.closest('button');if(b){$('#csMsg').value=b.dataset.m;$('#csMsg').focus()}});
+  $('#csSend').addEventListener('click',()=>{
+    if(!$('#csMsg').value.trim()){showToast('Write a message first ✍️');return}
+    showToast('Message sent to '+curRoom.ll.name+' 🎉');closeBSheet(contactSheet);
+  });
+  $('#csCall').addEventListener('click',()=>showToast('Calling '+curRoom.ll.name+' 📞'));
+  $('#csWa').addEventListener('click',()=>showToast('Opening WhatsApp 💬'));
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    if(contactSheet.classList.contains('open')){closeBSheet(contactSheet);return}
+    if(filterSheet.classList.contains('open')){closeBSheet(filterSheet);return}
+    if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))closeRoom();
+  });
+
+  renderRooms(false);updateRail();
+  window.addEventListener('popstate',()=>setPage(location.pathname.indexOf('/rooms')===0?'rooms':'home'));
 }
