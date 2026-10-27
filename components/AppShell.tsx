@@ -15,35 +15,39 @@ import StoryViewer from './StoryViewer';
 import RightRail from './RightRail';
 import GhettoClient from './GhettoClient';
 import ComposeSheet from './ComposeSheet';
-import type { AppData } from '../lib/types';
+import ProfilePage from './ProfilePage';
+import ProfileSheets from './ProfileSheets';
+import type { AppData, Profile } from '../lib/types';
 
 /**
- * Home and Rooms share one shell (sidebar, right column, sheets), so switching between them is instant.
- * `page` decides which one is showing first; /  -> home, /rooms -> rooms.
+ * Home, Rooms and Profile share one shell (sidebar, right column, sheets), so switching between them is instant.
+ * `page` decides which one is showing first; /  -> home, /rooms -> rooms, /profile[/username] -> profile.
  */
-export default function AppShell({ page, data }: { page: 'home' | 'rooms'; data: AppData }) {
+export default function AppShell({ page, data, profile }: { page: 'home' | 'rooms' | 'profile'; data: AppData; profile?: Profile | null }) {
   return (
     <>
       <div className="shell">
         {/* Desktop: left navigation */}
-        <Sidebar page={page} />
+        <Sidebar page={page} me={data.me} />
 
         <div className="app" data-page={page}>
           <div className="toast" id="toast"></div>
 
           <div className="scroll" id="scroll">
-            <TopBar />
+            <TopBar me={data.me} />
             <Stories stories={data.stories} />
-            <Feed posts={data.posts} />
+            <Feed posts={data.posts} meId={data.me.id} />
           </div>
 
           <RoomsPage />
+          <ProfilePage />
           <FabMenu />
           <BottomNav page={page} />
           <RoomDetail />
           <FilterSheet />
           <ContactSheet />
           <ComposeSheet />
+          <ProfileSheets />
           <SearchSheet />
           <NotificationsSheet />
           <PostDetail />
@@ -53,7 +57,7 @@ export default function AppShell({ page, data }: { page: 'home' | 'rooms'; data:
         {/* Desktop: right column (changes with the page) */}
         <RightRail />
       </div>
-      <GhettoClient data={data} />
+      <GhettoClient data={data} profile={profile} />
     </>
   );
 }

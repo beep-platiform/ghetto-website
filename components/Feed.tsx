@@ -21,14 +21,15 @@ function Actions({ p }: { p: Post }) {
   );
 }
 
-const LinkBtn = ({ on }: { on: boolean }) =>
+// `self` hides the Link button on your own posts (you cannot link with yourself)
+const LinkBtn = ({ on, self }: { on: boolean; self?: boolean }) =>
   on ? (
-    <button className="follow on"><i className="fa-solid fa-check"></i>Linked</button>
+    <button className={'follow on' + (self ? ' self' : '')}><i className="fa-solid fa-check"></i>Linked</button>
   ) : (
-    <button className="follow">Link</button>
+    <button className={'follow' + (self ? ' self' : '')}>Link</button>
   );
 
-function FeaturedPost({ p, i }: { p: Post; i: number }) {
+function FeaturedPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
   const [main, t2, t3] = p.photos;
   return (
     <article
@@ -48,7 +49,7 @@ function FeaturedPost({ p, i }: { p: Post; i: number }) {
           </div>
           <div className="meta">{metaOf(p)}</div>
         </div>
-        <LinkBtn on={p.author.linked} />
+        <LinkBtn on={p.author.linked} self={p.author.id === meId} />
         <button className="more" aria-label="More">
           <i className="fa-solid fa-ellipsis-vertical"></i>
         </button>
@@ -84,7 +85,7 @@ function FeaturedPost({ p, i }: { p: Post; i: number }) {
   );
 }
 
-function CompactPost({ p, i }: { p: Post; i: number }) {
+function CompactPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
   return (
     <article
       className="post compact"
@@ -107,7 +108,7 @@ function CompactPost({ p, i }: { p: Post; i: number }) {
                 {metaOf(p)} {p.tag === 'New' && <span className="tag">New</span>}
               </div>
             </div>
-            <LinkBtn on={p.author.linked} />
+            <LinkBtn on={p.author.linked} self={p.author.id === meId} />
           </div>
           <div className="compact-title">{p.title}</div>
           <div className="compact-copy">{p.body}</div>
@@ -123,10 +124,10 @@ function CompactPost({ p, i }: { p: Post; i: number }) {
   );
 }
 
-export default function Feed({ posts }: { posts: Post[] }) {
+export default function Feed({ posts, meId }: { posts: Post[]; meId: string }) {
   return (
     <main className="feed" id="feed">
-      {posts.map((p, i) => (p.kind === 'featured' ? <FeaturedPost p={p} i={i} key={p.id} /> : <CompactPost p={p} i={i} key={p.id} />))}
+      {posts.map((p, i) => (p.kind === 'featured' ? <FeaturedPost p={p} i={i} meId={meId} key={p.id} /> : <CompactPost p={p} i={i} meId={meId} key={p.id} />))}
     </main>
   );
 }

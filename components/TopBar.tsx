@@ -1,5 +1,8 @@
 
-export default function TopBar() {
+import type { AppData } from '../lib/types';
+import { faceUrl } from '../lib/format';
+
+export default function TopBar({ me }: { me: AppData['me'] }) {
   return (
     <header className="topbar">
       <b className="top-title">Home</b>
@@ -17,7 +20,7 @@ export default function TopBar() {
       </div>
       <button className="icon-btn" id="searchBtn" aria-label="Search"><i className="fa-solid fa-magnifying-glass"></i></button>
       <button className="icon-btn bell" id="bellBtn" aria-label="Notifications"><i className="fa-regular fa-bell"></i><span className="dot num" id="bellDot">4</span></button>
-      <div className="avatar me"><img alt="Your profile" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop&crop=faces" /></div>
+      <div className="avatar me" id="topMe" role="button" tabIndex={0} aria-label="Open your profile"><img id="topMeAv" alt="Your profile" src={faceUrl(me.avatar)} /></div>
     </header>
   );
 }

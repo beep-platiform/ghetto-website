@@ -826,3 +826,92 @@ mark{background:#fff0b3;color:inherit;border-radius:4px;padding:0 2px}
 .cs textarea+.cs-in{margin-top:10px;margin-bottom:0}
 .cs-in:focus{border-color:var(--yellow);background:#fff;box-shadow:0 8px 20px rgba(255,201,40,.22)}
 .cs-send:disabled{opacity:.55;pointer-events:none}
+
+/* ===== PROFILE PAGE ===== */
+.profile{position:absolute;inset:0;z-index:6;background:#fff;display:none}
+.app[data-page="profile"] .profile{display:block;animation:pgIn .45s cubic-bezier(.2,.9,.3,1.1)}
+.app[data-page="profile"] .scroll,.app[data-page="profile"] .rooms{display:none}
+.pf-scroll{height:100%;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;overscroll-behavior:contain;padding-bottom:92px}
+.pf-scroll::-webkit-scrollbar{display:none}
+.pf-top{position:sticky;top:0;z-index:12;display:flex;align-items:center;gap:12px;height:60px;padding:0 14px 0 12px;background:rgba(255,255,255,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.pf-top .pf-ico{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-size:17px;flex:0 0 auto;transition:.2s}
+.pf-top .pf-ico:hover{background:var(--bg)}
+.pf-top .pf-ico:active{transform:scale(.92)}
+.pf-top .pf-ico[hidden]{display:none}
+.pf-tt{flex:1;min-width:0}
+.pf-tt b{display:block;font-size:18px;font-weight:800;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf-tt small{display:block;font-size:12px;color:var(--muted);font-weight:700;margin-top:1px}
+.pf-cover{height:150px;background:linear-gradient(135deg,#ffd9a0,#ff9b6a 55%,#ffc928);background-size:cover;background-position:center;position:relative}
+.pf-cover:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(16,33,61,0) 55%,rgba(16,33,61,.18))}
+.pf-card{padding:0 18px 4px}
+.pf-avrow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:-46px;position:relative;z-index:2}
+.pf-av{width:94px;height:94px;border:4px solid #fff;box-shadow:0 8px 22px rgba(16,33,61,.18)}
+.pf-actions{display:flex;gap:8px;padding-bottom:4px}
+.pf-btn{height:42px;padding:0 18px;border-radius:21px;display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:800;background:var(--ink);color:#fff;box-shadow:0 10px 20px rgba(16,33,61,.2);transition:.2s;white-space:nowrap}
+.pf-btn:active{transform:scale(.95)}
+.pf-btn.ghost{background:#fff;color:var(--ink);box-shadow:inset 0 0 0 1.5px #d9dfeb}
+.pf-btn.ghost:hover{background:var(--bg)}
+.pf-actions .follow{height:42px;padding:0 20px;font-size:13.5px;border-radius:21px}
+.pf-name{display:flex;align-items:center;gap:7px;margin-top:12px;font-size:23px;font-weight:800;letter-spacing:-.6px;line-height:1.2}
+.pf-name i{font-size:15px;color:var(--blue)}
+.pf-handle{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:3px;font-size:14px;color:var(--muted);font-weight:700}
+.pf-role{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 10px;border-radius:11px;background:#fff3c4;color:#6b4d00;font-size:11.5px;font-weight:800}
+.pf-role.landlord{background:#e6f4ff;color:#14578f}
+.pf-bio{margin-top:12px;font-size:14.5px;line-height:1.55;color:#33415c;font-weight:600;white-space:pre-wrap;word-break:break-word}
+.pf-bio.empty{color:#9aa5b8;font-style:italic}
+.pf-meta{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;font-size:12.5px;color:var(--muted);font-weight:700}
+.pf-meta i{margin-right:6px;color:#9aa5b8}
+.pf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0 6px}
+.pf-stats button{padding:12px 6px;border-radius:18px;background:#f6f8fc;text-align:center;transition:.2s}
+.pf-stats button:hover{background:#eef1f8}
+.pf-stats button:active{transform:scale(.96)}
+.pf-stats b{display:block;font-size:20px;font-weight:800;letter-spacing:-.4px}
+.pf-stats small{display:block;font-size:12px;color:var(--muted);font-weight:800;margin-top:2px}
+.pf-tabs{position:sticky;top:60px;z-index:11;margin-top:10px}
+.pf-list{padding-top:14px}
+.pf-list.feed .post{margin-bottom:14px}
+.pf-empty{text-align:center;padding:42px 24px;color:var(--muted);font-size:13.5px;font-weight:700;line-height:1.5}
+.pf-empty .s-emoji{font-size:38px;margin-bottom:8px}
+.pf-empty b{display:block;color:var(--ink);font-size:16px;font-weight:800;margin-bottom:4px}
+.pf-empty button{margin-top:14px}
+.pf-rooms{padding:14px 18px 0}
+.s-user,#topMe{cursor:pointer}
+
+/* edit profile + links list sheets */
+.ep-l{display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 7px;font-size:12.5px;font-weight:800;color:#44546f}
+.ep-l em{font-style:normal;font-weight:700;color:var(--muted)}
+.ep .cs-in{margin-bottom:0}
+.ep textarea{width:100%}
+.ep-at{position:relative}
+.ep-at span{position:absolute;left:16px;top:0;height:50px;display:grid;place-items:center;font-weight:800;color:var(--muted)}
+.ep-at .cs-in{padding-left:34px}
+.ep-h{display:block;margin-top:6px;font-size:12px;color:var(--muted);font-weight:700}
+.ep-h.bad{color:var(--red)}
+.ep-seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ep-seg button{height:48px;border-radius:24px;background:#f4f6fa;font-size:14px;font-weight:800;color:#44546f;display:flex;align-items:center;justify-content:center;gap:9px;transition:.2s}
+.ep-seg button.on{background:var(--ink);color:#fff;box-shadow:0 10px 20px rgba(16,33,61,.22)}
+.ep-pick{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.ep-pick button{position:relative;aspect-ratio:1;border-radius:50%;overflow:hidden;background:#f1d7b4;box-shadow:0 0 0 2px #fff,0 0 0 3px #e5eaf2;transition:.2s}
+.ep-pick button.on{box-shadow:0 0 0 2px #fff,0 0 0 5px var(--yellow)}
+.ep-pick.cov{grid-template-columns:repeat(3,1fr)}
+.ep-pick.cov button{aspect-ratio:5/3;border-radius:14px}
+.ep-pick.cov button.none{display:grid;place-items:center;color:#8a95a8;font-size:18px;background:linear-gradient(135deg,#ffd9a0,#ff9b6a 55%,#ffc928)}
+.ep-err{min-height:20px;margin-top:14px;font-size:12.5px;font-weight:800;color:var(--red);text-align:center}
+.ep .cs-send{margin-top:6px}
+.ls-row .sr-person{padding-left:0;padding-right:0}
+.ls-row .follow{flex:0 0 auto}
+.ls-you{font-size:12px;font-weight:800;color:var(--muted);padding:0 6px}
+
+@media (min-width:760px){
+  .pf-cover{height:190px}
+  .pf-top{height:62px}
+  .pf-tabs{top:62px}
+  .app[data-page="profile"] .pf-scroll{padding-bottom:48px}
+}
+@media (max-width:420px){
+  .pf-actions .pf-btn span,.pf-actions .follow{font-size:13px}
+  .pf-btn{padding:0 14px}
+  .ep-pick{grid-template-columns:repeat(4,1fr)}
+}
+
+.follow.self{display:none}
