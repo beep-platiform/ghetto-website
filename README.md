@@ -78,3 +78,15 @@ Notes
 - On your own profile: **Edit profile** (name, username, bio, place, Student/Landlord, photo and cover from presets) and delete your own posts
   (the ⋮ button on a post, or ⋮ in the post view). On other profiles: **Link / Linked** and a Message button (coming soon).
 - Photos are picked from presets for now; uploading your own needs Supabase Storage (a good next step together with login).
+
+## Accounts, login & settings
+
+- Routes: `/login` (log in / create account), `/settings`, `/auth/callback`. `proxy.ts` sends logged-out visitors to `/login`.
+- Creating an account makes the profile and settings row automatically (database trigger on `auth.users`).
+- "Continue with Google" is a placeholder (marked "Soon") — to be wired up later.
+- Settings: account (edit profile, password), privacy (private account, activity, who can message), notifications, language, help, log out, delete account. Open it from the gear on your profile, the sidebar, or the account menu.
+- Run `supabase/migrations/0003_auth_settings.sql` after 0001 and 0002.
+
+### Supabase Auth setup
+1. Authentication → URL Configuration: set Site URL (`http://localhost:3000`, later your Vercel URL) and add Redirect URL `<site>/auth/callback`.
+2. For quick development, Authentication → Providers → Email → turn off "Confirm email". Otherwise new users must click the email link first.

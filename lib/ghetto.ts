@@ -6,10 +6,10 @@
  * All content comes from Supabase (DATA = public.get_app_data()); every change is saved back through RPC calls (lib/supabase.ts).
  */
 import { RFAC, RTYPES, RTYPE, ICON, POOL } from './constants';
-import { rpc } from './supabase';
+import { rpc, supabase, signOut } from './supabase';
 import { metaOf } from './format';
 
-export function initGhetto(DATA, INITIAL_PROFILE) {
+export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   if (typeof window === 'undefined' || window.__ghettoReady) return;
   window.__ghettoReady = true;
 
@@ -697,6 +697,7 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
     if(pg==='home')goHome();
     else if(pg==='search')$('#searchBtn').click();
     else if(pg==='notifications')$('#bellBtn').click();
+    else if(pg==='settings')openSettings();
     else{closeSheets();const nav=NAVS.find(n=>n.textContent.trim().toLowerCase()===pg);if(nav)nav.click()}
   });
   $('#sideCreate').addEventListener('click',e=>{
@@ -931,11 +932,12 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
   function closeBSheet(s){s.classList.remove('open');s.setAttribute('aria-hidden','true')}
   function setPage(pg){
     curPage=pg;appEl.dataset.page=pg;
-    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);closeBSheet(composeSheet);closeBSheet(editSheet);closeBSheet(linksSheet);
+    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);closeBSheet(composeSheet);closeBSheet(editSheet);closeBSheet(linksSheet);closeBSheet(pwSheet);closeBSheet(logoutSheet);closeBSheet(deleteSheet);
     if(detail.classList.contains('open'))closePost();
     if(roomDetail.classList.contains('open'))closeRoom();
     $$('.nav-item').forEach(n=>n.classList.toggle('active',n.textContent.trim().toLowerCase()===pg));
     syncSide();
+    const ss=$('.s-item[data-page="settings"]');if(ss)ss.classList.toggle('active',pg==='settings');
     if(pg==='rooms'){renderRooms(true);$('#rmScroll').scrollTop=0}
     updateRail();
   }
@@ -1139,7 +1141,7 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
   // PROFILE PAGE
   // =====================================================================
   const editSheet=$('#editSheet'),linksSheet=$('#linksSheet'),pfBody=$('#pfBody'),pfScroll=$('#pfScroll');
-  let curProfile=null,pfTab='posts',navDepth=0,prevPage='home',loadSeq=0;
+  let curProfile=null,pfTab='posts',navDepth=0,prevPage='home',loadSeq=0,pendingEdit=false;
   const profPath=h=>h===ME.handle?'/profile':'/profile/'+encodeURIComponent(h);
   const roomsOf=p=>ROOMS.filter(r=>r.ll.id===p.id);
   const countTxt=n=>n>=10000?Math.round(n/1000)+'k':n>=1000?(n/1000).toFixed(1).replace('.0','')+'k':String(n);
@@ -1171,11 +1173,12 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
     pfBody.innerHTML=
       '<header class="pf-top"><button type="button" class="pf-ico" data-pf="back" aria-label="Back"'+(p.isMe?' hidden':'')+'><i class="fa-solid fa-arrow-left"></i></button>'+
       '<div class="pf-tt"><b>'+esc(p.name)+'</b><small>@'+esc(p.handle)+'</small></div>'+
-      '<button type="button" class="pf-ico" data-pf="share" aria-label="Share profile"><i class="fa-solid fa-share-nodes"></i></button></header>'+
+      '<button type="button" class="pf-ico" data-pf="share" aria-label="Share profile"><i class="fa-solid fa-share-nodes"></i></button>'+
+      (p.isMe?'<button type="button" class="pf-ico" data-pf="settings" aria-label="Settings"><i class="fa-solid fa-gear"></i></button>':'')+'</header>'+
       '<div class="pf-cover"'+cover+'></div>'+
       '<div class="pf-card"><div class="pf-avrow"><div class="avatar pf-av"><img src="'+FACE(p.avatar)+'" alt="'+esc(p.name)+'" onerror="this.remove()"></div><div class="pf-actions">'+actions+'</div></div>'+
       '<h1 class="pf-name">'+esc(p.name)+(p.verified?'<i class="fa-solid fa-circle-check"></i>':'')+'</h1>'+
-      '<div class="pf-handle">@'+esc(p.handle)+'<span class="pf-role'+(p.role==='Landlord'?' landlord':'')+'">'+esc(p.role)+'</span></div>'+
+      '<div class="pf-handle">@'+esc(p.handle)+(p.private?' <i class="fa-solid fa-lock" title="Private account"></i>':'')+'<span class="pf-role'+(p.role==='Landlord'?' landlord':'')+'">'+esc(p.role)+'</span></div>'+
       (p.bio?'<p class="pf-bio">'+esc(p.bio)+'</p>':'<p class="pf-bio empty">'+(p.isMe?'Add a bio so people know who you are.':'No bio yet.')+'</p>')+
       '<div class="pf-meta">'+meta.join('')+'</div>'+
       '<div class="pf-stats"><button type="button" data-st="posts"><b id="pfStPosts">'+countTxt(p.posts)+'</b><small>Posts</small></button>'+
@@ -1193,6 +1196,11 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
     const p=curProfile,list=$('#pfList');if(!p||!list)return;
     $$('#pfTabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.pt===pfTab));
     const sc=$('#pfTabs .tab[data-pt="saved"] .tc');if(sc)sc.textContent=saved.size;
+    if(pfTab==='posts'&&p.restricted){
+      list.className='feed pf-list';
+      list.innerHTML='<div class="pf-empty"><div class="s-emoji">🔒</div><b>This account is private</b>Link with '+esc(p.name.split(' ')[0])+' to see their posts.</div>';
+      return;
+    }
     if(pfTab==='posts'){
       const els=$$('#feed .post').filter(a=>a.dataset.author===p.id);
       list.className='feed pf-list';list.innerHTML='';
@@ -1233,6 +1241,7 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
       if(seq!==loadSeq)return;
       if(!p){showToast('That profile does not exist 🤷');goHomeFromProfile();return}
       rememberPeople(p);curProfile=p;renderProfile();
+      if(pendingEdit){pendingEdit=false;if(p.isMe)openEdit()}
     }).catch(()=>{if(seq===loadSeq){fail('Could not load that profile');goHomeFromProfile()}});
   }
   function openProfile(handle){
@@ -1261,6 +1270,7 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
     if(act==='back')backFromProfile();
     else if(act==='edit')openEdit();
     else if(act==='compose')openCompose();
+    else if(act==='settings')openSettings();
     else if(act==='message')showToast('Messages are coming soon 💬');
     else if(act==='share'){
       const url=location.origin+profPath(curProfile.handle);
@@ -1347,6 +1357,7 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
     const oldH=ME.handle;
     ME.name=p.name;ME.handle=p.handle;ME.avatar=p.avatar;ME.role=p.role;ME.area=p.area;USER=p.avatar;
     HANDLES[ME.id]=p.handle;PNAME[ME.id]=p.name;
+    if(SET){SET.name=p.name;SET.handle=p.handle;SET.avatar=p.avatar;SET.role=p.role}
     $('#sUserName').textContent=p.name;$('#sUserSub').textContent=p.role+(p.area?' · '+p.area:'');
     [$('#sUserAv'),$('#topMeAv')].forEach(i=>{if(i){i.style.display='';i.src=FACE(p.avatar)}});
     $$('.post[data-author="'+ME.id+'"]').forEach(a=>{
@@ -1387,11 +1398,12 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
   })});
 
   // browser back / forward and deep links
-  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/rooms')===0?'rooms':'home';
+  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':'home';
   window.addEventListener('popstate',()=>{
     const pg=pagePath();
     if(navDepth>0)navDepth--;
     if(pg==='profile'){const seg=location.pathname.split('/')[2];showProfile(seg?decodeURIComponent(seg):ME.handle)}
+    else if(pg==='settings')showSettings();
     else setPage(pg);
   });
   if(curPage==='profile'){
@@ -1399,4 +1411,161 @@ export function initGhetto(DATA, INITIAL_PROFILE) {
     else showProfile(ME.handle);
   }
 
+
+  // =====================================================================
+  // SETTINGS + ACCOUNT (log out, password, delete)
+  // =====================================================================
+  const pwSheet=$('#pwSheet'),logoutSheet=$('#logoutSheet'),deleteSheet=$('#deleteSheet'),stBody=$('#stBody'),stScroll=$('#stScroll'),userMenu=$('#userMenu');
+  let SET=INITIAL_SETTINGS||null;
+  // setting name in the page  ->  column name in the database
+  const SKEY={privateAccount:'private_account',showActivity:'show_activity',notifyLikes:'notify_likes',notifyComments:'notify_comments',notifyLinks:'notify_links',notifyRooms:'notify_rooms',notifyPrices:'notify_prices',notifyEmail:'notify_email',whoCanMessage:'who_can_message',language:'language'};
+  const LANGS=[['en','English'],['rw','Kinyarwanda'],['fr','Français']];
+  const WHO=[['everyone','Everyone'],['links','My links'],['nobody','No one']];
+  const swRow=(k,icon,tone,t,d)=>'<div class="st-row tap" data-sw="'+k+'" role="switch" tabindex="0" aria-checked="'+!!SET[k]+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span><span class="st-sw'+(SET[k]?' on':'')+'"></span></div>';
+  const linkRow=(act,icon,tone,t,d,val,cls)=>'<button type="button" class="st-row'+(cls?' '+cls:'')+'" data-st="'+act+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b>'+(d?'<small>'+d+'</small>':'')+'</span>'+(val?'<span class="st-val">'+esc(val)+'</span>':'')+'<i class="fa-solid fa-chevron-right st-chev"></i></button>';
+  const segRow=(k,icon,tone,t,d,opts)=>'<div class="st-row st-seg-row"><div class="st-head"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span></div><div class="st-seg" data-seg="'+k+'">'+opts.map(o=>'<button type="button" data-val="'+o[0]+'" class="'+(SET[k]===o[0]?'on':'')+'">'+o[1]+'</button>').join('')+'</div></div>';
+
+  function renderSettings(){
+    if(!SET){stBody.innerHTML='<div class="d-empty">Loading settings…</div>';return}
+    const s=SET;
+    stBody.innerHTML=
+      '<header class="st-top"><button type="button" class="pf-ico" data-st="back" aria-label="Back"><i class="fa-solid fa-arrow-left"></i></button><b>Settings</b></header>'+
+      '<div class="st-wrap">'+
+      '<div class="st-who" data-st="profile" role="button" tabindex="0"><div class="avatar"><img src="'+FACE(s.avatar)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(s.name)+'</b><small>@'+esc(s.handle)+' · '+esc(s.role)+'</small></div><i class="fa-solid fa-chevron-right go"></i></div>'+
+      '<div class="st-h">Your account</div><div class="st-group">'+
+        linkRow('edit','fa-user-pen','y','Edit profile','Name, username, bio, photo and cover')+
+        '<div class="st-row"><span class="st-ic b"><i class="fa-regular fa-envelope"></i></span><span class="st-t"><b>Email</b><small>Used to log in</small></span><span class="st-val">'+esc(s.email||'')+'</span></div>'+
+        linkRow('password','fa-key','g','Change password','Keep your account safe')+
+      '</div>'+
+      '<div class="st-h">Privacy</div><div class="st-group">'+
+        swRow('privateAccount','fa-lock','b','Private account','Only people linked with you can see your posts')+
+        swRow('showActivity','fa-circle','g','Activity status','Let people see when you are active')+
+        segRow('whoCanMessage','fa-comment-dots','y','Who can message you','Choose who may start a chat with you',WHO)+
+      '</div>'+
+      '<div class="st-h">Notifications</div><div class="st-group">'+
+        swRow('notifyLikes','fa-heart','r','Likes','When someone likes your post')+
+        swRow('notifyComments','fa-comment','b','Comments and mentions','Replies, comments and @mentions')+
+        swRow('notifyLinks','fa-user-plus','g','New links','When someone links with you')+
+        swRow('notifyRooms','fa-building','y','Room updates','New rooms from landlords you link with')+
+        swRow('notifyPrices','fa-tags','y','Price updates','Market price changes near you')+
+        swRow('notifyEmail','fa-envelope','b','Email notifications','Also send important updates to your email')+
+      '</div>'+
+      '<div class="st-h">Language</div><div class="st-group">'+
+        segRow('language','fa-globe','g','App language','Translations are coming soon',LANGS)+
+      '</div>'+
+      '<div class="st-h">Help and about</div><div class="st-group">'+
+        linkRow('help','fa-circle-question','b','Help centre','')+
+        linkRow('safety','fa-shield-halved','g','Safety tips','Visit first, never pay before you meet the landlord')+
+        linkRow('terms','fa-file-lines','y','Terms and privacy','')+
+        linkRow('about','fa-circle-info','b','About Ghetto','Version 0.1')+
+      '</div>'+
+      '<div class="st-h">Login</div><div class="st-group">'+
+        linkRow('logout','fa-right-from-bracket','r','Log out','Signed in as '+esc(s.email||'@'+s.handle))+
+        linkRow('delete','fa-trash','r','Delete account','Remove your profile and everything you posted','','danger')+
+      '</div>'+
+      '<div class="st-foot">Ghetto · Live. Learn. Grow...</div></div>';
+  }
+  function showSettings(){
+    if(curPage!=='settings')prevPage=curPage;
+    setPage('settings');stScroll.scrollTop=0;
+    renderSettings();
+    return rpc('get_settings').then(s=>{SET=s;renderSettings()}).catch(()=>{if(!SET)fail('Could not load your settings')});
+  }
+  function openSettings(){try{history.pushState(null,'','/settings');navDepth++}catch(e){}showSettings()}
+  function backFromSettings(){
+    if(navDepth>0){history.back();return}
+    const to=prevPage==='settings'||prevPage==='profile'?'home':prevPage;
+    setPage(to);try{history.pushState(null,'',to==='rooms'?'/rooms':'/')}catch(e){}
+  }
+
+  function saveSetting(k,v){
+    const old=SET[k];SET[k]=v;
+    return rpc('update_setting',{p_key:SKEY[k],p_value:v}).catch(()=>{SET[k]=old;renderSettings();fail('Could not save that setting')});
+  }
+  stBody.addEventListener('click',e=>{
+    const sw=e.target.closest('[data-sw]');
+    if(sw){
+      const k=sw.dataset.sw,on=!SET[k];
+      saveSetting(k,on);
+      const t=$('.st-sw',sw);t.classList.toggle('on',on);sw.setAttribute('aria-checked',String(on));
+      if(k==='privateAccount')showToast(on?'Private account on 🔒':'Private account off');
+      return;
+    }
+    const sg=e.target.closest('.st-seg button');
+    if(sg){
+      const box=sg.closest('.st-seg'),k=box.dataset.seg;
+      $$('button',box).forEach(b=>b.classList.toggle('on',b===sg));
+      saveSetting(k,sg.dataset.val);
+      showToast(k==='language'?'Language saved. Translations are coming soon 🌍':'Saved ✅');
+      return;
+    }
+    const a=e.target.closest('[data-st]');if(!a)return;
+    const act=a.dataset.st;
+    if(act==='back')backFromSettings();
+    else if(act==='profile')openProfile(ME.handle);
+    else if(act==='edit'){pendingEdit=true;openProfile(ME.handle)}
+    else if(act==='password')openPassword();
+    else if(act==='logout')openLogout();
+    else if(act==='delete')openDelete();
+    else if(act==='help')showToast('Help centre is coming soon 🙋');
+    else if(act==='safety')showToast('Visit the room and meet the landlord before you pay 🛡️');
+    else if(act==='terms')showToast('Terms and privacy page is coming soon 📄');
+    else if(act==='about')showToast('Ghetto 0.1 · Live. Learn. Grow... 🧡');
+  });
+  stBody.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sw],.st-who')){e.preventDefault();e.target.click()}});
+
+  // ---- change password ----
+  function openPassword(){$('#pwNew').value='';$('#pwNew2').value='';$('#pwErr').textContent='';openBSheet(pwSheet);setTimeout(()=>$('#pwNew').focus(),350)}
+  $('#pwSave').addEventListener('click',()=>{
+    const a=$('#pwNew').value,b=$('#pwNew2').value,err=$('#pwErr'),btn=$('#pwSave');err.textContent='';
+    if(a.length<8){err.textContent='Password must be at least 8 characters';return}
+    if(a!==b){err.textContent='The two passwords do not match';return}
+    btn.disabled=true;
+    supabase().auth.updateUser({password:a}).then(({error})=>{
+      if(error){err.textContent=error.message;return}
+      closeBSheet(pwSheet);showToast('Password changed 🔐');
+    }).catch(()=>{err.textContent='Could not change your password. Try again'}).finally(()=>{btn.disabled=false});
+  });
+
+  // ---- log out ----
+  function openLogout(){$('#loSub').textContent='You are logged in as @'+ME.handle+'. You can log back in any time.';openBSheet(logoutSheet)}
+  $('#loGo').addEventListener('click',()=>{$('#loGo').disabled=true;signOut()});
+  $('#loCancel').addEventListener('click',()=>closeBSheet(logoutSheet));
+
+  // ---- delete account ----
+  function openDelete(){$('#dlConfirm').value='';$('#dlErr').textContent='';$('#dlGo').disabled=true;openBSheet(deleteSheet)}
+  $('#dlConfirm').addEventListener('input',e=>{$('#dlGo').disabled=e.target.value.trim()!=='DELETE'});
+  $('#dlGo').addEventListener('click',()=>{
+    const btn=$('#dlGo');btn.disabled=true;
+    rpc('delete_account').then(()=>signOut()).catch(()=>{$('#dlErr').textContent='Could not delete your account. Try again';btn.disabled=false});
+  });
+  [pwSheet,logoutSheet,deleteSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    if(pwSheet.classList.contains('open')){closeBSheet(pwSheet);return}
+    if(logoutSheet.classList.contains('open')){closeBSheet(logoutSheet);return}
+    if(deleteSheet.classList.contains('open')){closeBSheet(deleteSheet);return}
+    closeUserMenu();
+  });
+
+  // ---- desktop account menu (the ... next to your name) ----
+  function closeUserMenu(){userMenu.classList.remove('open');userMenu.setAttribute('aria-hidden','true')}
+  $('#sUserMore').addEventListener('click',e=>{
+    e.stopPropagation();
+    if(userMenu.classList.contains('open')){closeUserMenu();return}
+    const r=$('#sUser').getBoundingClientRect();
+    $('#umLogout').textContent='Log out @'+ME.handle;
+    userMenu.style.left=Math.max(12,r.left)+'px';userMenu.style.bottom=(window.innerHeight-r.top+8)+'px';
+    userMenu.classList.add('open');userMenu.setAttribute('aria-hidden','false');
+  });
+  userMenu.addEventListener('click',e=>{
+    const b=e.target.closest('[data-um]');if(!b)return;
+    closeUserMenu();
+    if(b.dataset.um==='profile')openProfile(ME.handle);
+    else if(b.dataset.um==='settings')openSettings();
+    else openLogout();
+  });
+  document.addEventListener('click',e=>{if(!e.target.closest('#userMenu,#sUserMore'))closeUserMenu()});
+
+  if(curPage==='settings')renderSettings();
 }

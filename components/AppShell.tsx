@@ -17,13 +17,15 @@ import GhettoClient from './GhettoClient';
 import ComposeSheet from './ComposeSheet';
 import ProfilePage from './ProfilePage';
 import ProfileSheets from './ProfileSheets';
-import type { AppData, Profile } from '../lib/types';
+import SettingsPage from './SettingsPage';
+import SettingsSheets from './SettingsSheets';
+import type { AppData, Profile, Settings } from '../lib/types';
 
 /**
  * Home, Rooms and Profile share one shell (sidebar, right column, sheets), so switching between them is instant.
- * `page` decides which one is showing first; /  -> home, /rooms -> rooms, /profile[/username] -> profile.
+ * `page` decides which one is showing first; /  -> home, /rooms -> rooms, /profile[/username] -> profile, /settings -> settings.
  */
-export default function AppShell({ page, data, profile }: { page: 'home' | 'rooms' | 'profile'; data: AppData; profile?: Profile | null }) {
+export default function AppShell({ page, data, profile, settings }: { page: 'home' | 'rooms' | 'profile' | 'settings'; data: AppData; profile?: Profile | null; settings?: Settings | null }) {
   return (
     <>
       <div className="shell">
@@ -41,6 +43,7 @@ export default function AppShell({ page, data, profile }: { page: 'home' | 'room
 
           <RoomsPage />
           <ProfilePage />
+          <SettingsPage />
           <FabMenu />
           <BottomNav page={page} />
           <RoomDetail />
@@ -48,6 +51,7 @@ export default function AppShell({ page, data, profile }: { page: 'home' | 'room
           <ContactSheet />
           <ComposeSheet />
           <ProfileSheets />
+          <SettingsSheets />
           <SearchSheet />
           <NotificationsSheet />
           <PostDetail />
@@ -57,7 +61,7 @@ export default function AppShell({ page, data, profile }: { page: 'home' | 'room
         {/* Desktop: right column (changes with the page) */}
         <RightRail />
       </div>
-      <GhettoClient data={data} profile={profile} />
+      <GhettoClient data={data} profile={profile} settings={settings} />
     </>
   );
 }

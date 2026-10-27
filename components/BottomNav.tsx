@@ -1,5 +1,5 @@
 
-export default function BottomNav({ page }: { page: 'home' | 'rooms' | 'profile' }) {
+export default function BottomNav({ page }: { page: 'home' | 'rooms' | 'profile' | 'settings' }) {
   return (
     <nav className="bottom-nav" aria-label="Main navigation">
       <button className={'nav-item' + (page === 'home' ? ' active' : '')}><i className="fa-solid fa-house"></i>Home</button>
