@@ -3,19 +3,30 @@
  * Client-side behaviour for the Ghetto home page (stories viewer, post detail + comments,
  * search / notification sheets, desktop right rail ...). It is the original script from the
  * HTML version, now an ES module that runs once the React markup is on the page.
- * Static data lives in ../data.
+ * All content comes from Supabase (DATA = public.get_app_data()); every change is saved back through RPC calls (lib/supabase.ts).
  */
-import { ORDER, STORIES } from '../data/stories';
-import { AV, POOL, PEOPLE, TREND } from '../data/people';
-import { COMMENTS } from '../data/comments';
-import { NOTIFS, ICON } from '../data/notifications';
-import { RFAC, RTYPES, RTYPE, RLL, ROOMS, REVIEWS } from '../data/rooms';
+import { RFAC, RTYPES, RTYPE, ICON, POOL } from './constants';
+import { rpc } from './supabase';
+import { metaOf } from './format';
 
-export function initGhetto() {
+export function initGhetto(DATA) {
   if (typeof window === 'undefined' || window.__ghettoReady) return;
   window.__ghettoReady = true;
 
   const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>[...c.querySelectorAll(s)];
+
+  // ---- data from the database ----
+  const ORDER=DATA.stories.map(s=>s.id),STORIES={};
+  DATA.stories.forEach(s=>{STORIES[s.id]={name:s.name,time:s.time,slides:s.slides}});
+  const COMMENTS=DATA.comments,PEOPLE=DATA.people,TREND=DATA.trending,NOTIFS=DATA.notifications,ROOMS=DATA.rooms,TODAY=DATA.today;
+  const USER=DATA.me.avatar;
+  // who is linked with me (by profile id) + names for toasts
+  const LINKED=new Set(),PNAME={};
+  PEOPLE.forEach(p=>{PNAME[p.id]=p.n;if(p.linked)LINKED.add(p.id)});
+  DATA.posts.forEach(p=>{PNAME[p.author.id]=p.author.name;if(p.author.linked)LINKED.add(p.author.id)});
+  NOTIFS.forEach(n=>{if(n.actor){PNAME[n.actor]=n.name;if(n.linked)LINKED.add(n.actor)}});
+  const CHK='<i class="fa-solid fa-check"></i>';
+  const fail=m=>{showToast(m+' ⚠️')};
 
   // ---- on-screen keyboard: never leave the page shifted up after the keyboard closes ----
   // Focusing an input makes mobile browsers scroll the page / overlays to reveal it; when the keyboard is
@@ -62,14 +73,7 @@ export function initGhetto() {
     }
   }
 
-  // likes
-  $$('.action.like').forEach(b=>b.addEventListener('click',()=>{
-    const on=b.classList.toggle('on'),icon=$('i',b),num=$('span',b),base=+b.dataset.count;
-    icon.className=on?'fa-solid fa-heart':'fa-regular fa-heart';
-    num.textContent=on?base+1:base;
-    if(on){const r=icon.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}
-  }));
-  $$('.action.share').forEach(b=>b.addEventListener('click',()=>showToast('Link copied 🔗')));
+  // likes / share / link buttons on feed posts are handled by one delegated listener on #feed (see below)
 
   // stories
   $$('.story').forEach(s=>s.addEventListener('click',()=>{
@@ -88,14 +92,20 @@ export function initGhetto() {
   })();
 
 
-  // link / unlink
-  $$('.follow').forEach(b=>b.addEventListener('click',e=>{
-    e.stopPropagation();
-    const on=b.classList.toggle('on');
-    b.innerHTML=on?'<i class="fa-solid fa-check"></i>Linked':'Link';
-    const name=b.closest('.post').querySelector('.author').textContent.trim().split(' ')[0];
+  // link / unlink: one place keeps the feed, search, rail and notifications in sync and saves it
+  function paintLinks(pid){
+    const on=LINKED.has(pid);
+    $$('#feed .post[data-author="'+pid+'"] .follow,.sr-person[data-pid="'+pid+'"] .follow').forEach(b=>{b.classList.toggle('on',on);b.innerHTML=on?CHK+'Linked':'Link'});
+    $$('.n-follow[data-pid="'+pid+'"]').forEach(b=>{b.classList.toggle('on',on);b.innerHTML=on?CHK+'Linked':'Link back'});
+    if(typeof curArt!=='undefined'&&curArt)syncDetail();
+  }
+  function toggleLink(pid){
+    if(!pid)return;
+    const name=(PNAME[pid]||'them').split(' ')[0],on=!LINKED.has(pid);
+    on?LINKED.add(pid):LINKED.delete(pid);paintLinks(pid);
     showToast(on?'You linked with '+name+' 🔗':'You unlinked '+name);
-  }));
+    rpc('toggle_link',{p_profile:pid}).catch(()=>{on?LINKED.delete(pid):LINKED.add(pid);paintLinks(pid);fail('Could not save that')});
+  }
 
   // nav
   $$('.nav-item').forEach(b=>b.addEventListener('click',()=>{
@@ -110,7 +120,11 @@ export function initGhetto() {
     fab.classList.toggle('open');menu.classList.toggle('show');
     if(fab.classList.contains('open')){const r=fab.getBoundingClientRect();burst(r.left+r.width/2,r.top,['✨','⭐','🎉'])}
   });
-  $$('button',menu).forEach(b=>b.addEventListener('click',()=>{showToast(b.dataset.msg);fab.classList.remove('open');menu.classList.remove('show')}));
+  $$('button',menu).forEach(b=>b.addEventListener('click',()=>{
+    fab.classList.remove('open');menu.classList.remove('show');
+    if(b.dataset.act==='compose'){openCompose();return}
+    showToast(b.dataset.msg);
+  }));
   document.addEventListener('click',e=>{if(!e.target.closest('#fab')&&!e.target.closest('#fabMenu')&&!e.target.closest('#sideCreate')){fab.classList.remove('open');menu.classList.remove('show')}});
 
   // ===== STORY VIEWER =====
@@ -186,7 +200,6 @@ export function initGhetto() {
 
   // ===== POST DETAIL + COMMENTS =====
   const FACE=id=>'https://images.unsplash.com/'+id+'?w=100&h=100&fit=crop&crop=faces';
-  const USER=AV.emmanuel;
   const ago=t=>t<1?'Just now':t<60?t+'m':t<1440?Math.floor(t/60)+'h':Math.floor(t/1440)+'d';
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const totalOf=id=>COMMENTS[id].reduce((s,c)=>s+1+c.replies.length,0);
@@ -203,15 +216,16 @@ export function initGhetto() {
       '<span class="pc-like"><i class="fa-solid fa-heart"></i>'+top.likes+'</span></button>'+
       '<button class="pc-all" type="button">View all '+plural(n)+'</button>';
   }
-  $$('#feed .post').forEach((a,i)=>{
-    a.dataset.id='p'+(i+1);
+  function setupPost(a){
+    if(!COMMENTS[a.dataset.id])COMMENTS[a.dataset.id]=[];
     const pc=document.createElement('div');pc.className='pc';a.appendChild(pc);
     refreshPreview(a);
-  });
+  }
+  $$('#feed .post').forEach(setupPost);
 
   // ---- detail view ----
   const detail=$('#detail'),dScroll=$('#dScroll'),dPost=$('#dPost'),dList=$('#dList'),dInput=$('#dInput'),dSend=$('#dSend');
-  let curArt=null,curId=null,order=[],sortMode='top',replyTo=null,newId=0,popId=0;
+  let curArt=null,curId=null,order=[],sortMode='top',replyTo=null,newId=0,popId=0,uid=0;
 
   function info(art){
     const name=$('.author',art).childNodes[0].textContent.trim();
@@ -289,6 +303,12 @@ export function initGhetto() {
     return on;
   }
 
+  function likeArt(art){
+    const on=toggleArtLike(art);
+    rpc('toggle_post_like',{p_post:art.dataset.id}).catch(()=>{toggleArtLike(art);if(curArt===art)syncDetail();fail('Could not save your like')});
+    return on;
+  }
+
   function topId(){
     const arr=COMMENTS[curId];if(!arr.length)return 0;
     return arr.reduce((m,c)=>c.likes>m.likes?c:m,arr[0]).id;
@@ -344,6 +364,7 @@ export function initGhetto() {
     curArt=null;
   }
   function startReply(parentId,name){
+    if(parentId<0){showToast('Still sending… try again in a second');return}
     replyTo={id:parentId,name:name};
     $('#dReplyText').innerHTML='Replying to <b>'+esc(name)+'</b>';
     $('#dReplying').classList.add('show');
@@ -352,11 +373,12 @@ export function initGhetto() {
   function cancelReply(){replyTo=null;$('#dReplying').classList.remove('show');dInput.placeholder='Add a comment...'}
   function submitComment(){
     const v=dInput.value.trim();if(!v||!curArt)return;
-    const arr=COMMENTS[curId];
-    const item={id:++uid,name:'You',av:USER,t:0,likes:0,liked:false,mine:true,text:v,open:false,replies:[]};
-    newId=item.id;
-    if(replyTo){
-      const parent=arr.find(c=>c.id===replyTo.id);
+    const postId=curId,arr=COMMENTS[postId],parentId=replyTo?replyTo.id:null;
+    const item={id:-(++uid),name:'You',av:USER,t:0,likes:0,liked:false,mine:true,text:v,open:false,replies:[]};
+    const tmp=item.id;newId=tmp;
+    let parent=null;
+    if(parentId!==null){
+      parent=arr.find(c=>c.id===parentId);
       if(parent){parent.replies.push(item);parent.open=true}
     }else{arr.unshift(item);order.unshift(item.id)}
     const wasReply=!!replyTo;
@@ -368,11 +390,31 @@ export function initGhetto() {
       scrollToComments();
     }
     showToast(wasReply?'Reply posted 💬':'Comment posted 🎉');
+    // save it; swap the temporary id for the real one
+    rpc('add_comment',{p_post:postId,p_parent:parentId,p_body:v}).then(r=>{
+      item.id=r.id;const ix=order.indexOf(tmp);if(ix>-1)order[ix]=r.id;
+      if(curArt&&curId===postId)renderList();
+    }).catch(()=>{
+      const k=arr.indexOf(item);if(k>-1)arr.splice(k,1);
+      if(parent)parent.replies=parent.replies.filter(x=>x!==item);
+      order=order.filter(x=>x!==tmp);
+      if(curArt&&curId===postId)renderList();else if(curArt)refreshPreview(curArt);
+      fail('Your comment was not saved');
+    });
   }
 
   // feed: tap a post to expand it (buttons keep their own jobs)
   $('#feed').addEventListener('click',e=>{
-    if(e.target.closest('.follow,.more,.action.like,.action.share'))return;
+    const lk=e.target.closest('.action.like');
+    if(lk){
+      const on=likeArt(lk.closest('.post'));
+      if(on){const r=$('i',lk).getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}
+      return;
+    }
+    if(e.target.closest('.action.share')){showToast('Link copied 🔗');return}
+    const fb=e.target.closest('.follow');
+    if(fb){toggleLink(fb.closest('.post').dataset.author);return}
+    if(e.target.closest('.more'))return;
     const art=e.target.closest('.post');if(!art)return;
     const toComments=!!e.target.closest('.action.cmt,.pc-row,.pc-all');
     openPost(art,toComments?'comments':'top');
@@ -384,7 +426,7 @@ export function initGhetto() {
     const b=e.target.closest('[data-act]');if(!b)return;
     const act=b.dataset.act;
     if(act==='like'){
-      const on=toggleArtLike(curArt);syncDetail();
+      const on=likeArt(curArt);syncDetail();
       if(on){const r=$('i',b).getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}
     }else if(act==='cmt'){
       scrollToComments();setTimeout(()=>dInput.focus(),350);
@@ -402,7 +444,16 @@ export function initGhetto() {
 
   dList.addEventListener('click',e=>{
     const heart=e.target.closest('.c-heart');
-    if(heart){const c=findC(+heart.dataset.cid);if(c){c.liked=!c.liked;c.likes+=c.liked?1:-1;popId=c.liked?c.id:0;renderList()}return}
+    if(heart){
+      const c=findC(+heart.dataset.cid);
+      if(c){
+        if(c.id<0){showToast('Still sending… try again in a second');return}
+        const flip=()=>{c.liked=!c.liked;c.likes+=c.liked?1:-1};
+        flip();popId=c.liked?c.id:0;renderList();
+        rpc('toggle_comment_like',{p_comment:c.id}).catch(()=>{flip();popId=0;if(curArt)renderList();fail('Could not save your like')});
+      }
+      return;
+    }
     const rep=e.target.closest('.c-reply');
     if(rep){startReply(+rep.dataset.cid,rep.dataset.name);return}
     const tg=e.target.closest('.c-toggle');
@@ -437,7 +488,6 @@ export function initGhetto() {
   });
 
   // ---- search ----
-  const followed=new Set();
   let sTab='all',TOK=[];
   function loadRecent(){
     try{const v=JSON.parse(localStorage.getItem('ghettoRecent'));if(Array.isArray(v))return v}catch(e){}
@@ -469,8 +519,8 @@ export function initGhetto() {
   const sec=t=>'<div class="sec-h"><span>'+t+'</span></div>';
   function followBtn(on){return '<button type="button" class="follow'+(on?' on':'')+'">'+(on?'<i class="fa-solid fa-check"></i>Linked':'Link')+'</button>'}
   function personHTML(p){
-    return '<div class="sr-person" data-name="'+esc(p.n)+'"><div class="avatar"><img src="'+FACE(AV[p.av])+'" alt="" onerror="this.remove()"></div>'+
-      '<div class="sr-main"><b>'+hl(p.n,TOK)+(p.r?' <em>('+esc(p.r)+')</em>':'')+'</b><small>'+hl(p.s,TOK)+'</small></div>'+followBtn(followed.has(p.n))+'</div>';
+    return '<div class="sr-person" data-pid="'+p.id+'" data-name="'+esc(p.n)+'"><div class="avatar"><img src="'+FACE(p.av)+'" alt="" onerror="this.remove()"></div>'+
+      '<div class="sr-main"><b>'+hl(p.n,TOK)+(p.r?' <em>('+esc(p.r)+')</em>':'')+'</b><small>'+hl(p.s,TOK)+'</small></div>'+followBtn(LINKED.has(p.id))+'</div>';
   }
   function postRowHTML(p){
     return '<div class="sr-post" data-id="'+p.id+'"><div class="sr-thumb">'+(p.img?'<img src="'+p.img+'" alt="" onerror="this.remove()">':'')+'</div>'+
@@ -526,11 +576,7 @@ export function initGhetto() {
   sBody.addEventListener('click',e=>{
     const fb=e.target.closest('.follow');
     if(fb){
-      const row=fb.closest('.sr-person'),nm=row.dataset.name,on=!followed.has(nm);
-      on?followed.add(nm):followed.delete(nm);
-      fb.className='follow'+(on?' on':'');fb.innerHTML=on?'<i class="fa-solid fa-check"></i>Linked':'Link';
-      showToast(on?'You linked with '+nm+' 🔗':'You unlinked '+nm);
-      renderRail();
+      toggleLink(fb.closest('.sr-person').dataset.pid);
       return;
     }
     const x=e.target.closest('.chip-x');
@@ -551,7 +597,6 @@ export function initGhetto() {
 
   // ---- notifications ----
   let nTab='all',nIdx=0;
-  const nFollowed=new Set();
   const unreadCount=()=>NOTIFS.filter(n=>n.unread).length;
   function updateBell(){
     const c=unreadCount(),d=$('#bellDot');
@@ -566,10 +611,10 @@ export function initGhetto() {
   }
   function notifHTML(n){
     let right='';
-    if(n.fb)right='<button type="button" class="follow n-follow'+(nFollowed.has(n.id)?' on':'')+'">'+(nFollowed.has(n.id)?'<i class="fa-solid fa-check"></i>Linked':'Link back')+'</button>';
+    if(n.fb)right='<button type="button" class="follow n-follow'+(LINKED.has(n.actor)?' on':'')+'" data-pid="'+n.actor+'">'+(LINKED.has(n.actor)?CHK+'Linked':'Link back')+'</button>';
     else if(n.post){const im=thumbOf(n.post);right='<div class="n-thumb">'+(im?'<img src="'+im+'" alt="" onerror="this.remove()">':'')+'</div>'}
     return '<div class="n-item'+(n.unread?' unread':'')+'" data-id="'+n.id+'" style="--i:'+(nIdx++)+'">'+
-      '<div class="n-av"><img src="'+FACE(AV[n.av])+'" alt="" onerror="this.remove()"><span class="n-badge t-'+n.t+'"><i class="fa-solid '+ICON[n.t]+'"></i></span></div>'+
+      '<div class="n-av"><img src="'+FACE(n.av)+'" alt="" onerror="this.remove()"><span class="n-badge t-'+n.t+'"><i class="fa-solid '+ICON[n.t]+'"></i></span></div>'+
       '<div class="n-main"><p>'+n.html+'</p>'+(n.quote?'<span class="n-quote">“'+esc(n.quote)+'”</span>':'')+'<span class="n-time">'+n.time+'</span></div>'+
       right+'<span class="n-dot"></span></div>';
   }
@@ -589,11 +634,13 @@ export function initGhetto() {
   function markRead(n,el){
     if(!n.unread)return;
     n.unread=false;if(el)el.classList.remove('unread');updateBell();
+    rpc('mark_notification_read',{p_id:+n.id}).catch(()=>{});
   }
   $('#bellBtn').addEventListener('click',()=>{nTab='all';renderNotifs();nBody.scrollTop=0;openSheet(sNotif)});
   $('#nTabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b)return;nTab=b.dataset.tab;renderNotifs()});
   $('#markAll').addEventListener('click',()=>{
     NOTIFS.forEach(n=>n.unread=false);
+    rpc('mark_all_notifications_read').catch(()=>{});
     $$('#nBody .n-item').forEach(el=>el.classList.remove('unread'));
     updateBell();showToast('All caught up ✅');
     if(nTab==='unread')setTimeout(renderNotifs,350);
@@ -603,9 +650,7 @@ export function initGhetto() {
     const n=NOTIFS.find(x=>x.id===el.dataset.id);if(!n)return;
     const fb=e.target.closest('.n-follow');
     if(fb){
-      const on=!nFollowed.has(n.id);on?nFollowed.add(n.id):nFollowed.delete(n.id);
-      fb.className='follow n-follow'+(on?' on':'');fb.innerHTML=on?'<i class="fa-solid fa-check"></i>Linked':'Link back';
-      showToast(on?'You linked with '+n.name+' 🔗':'You unlinked '+n.name);
+      toggleLink(n.actor);
       markRead(n,el);return;
     }
     markRead(n,el);
@@ -662,8 +707,8 @@ export function initGhetto() {
 
   // right rail
   function railPerson(p){
-    return '<div class="sr-person" data-name="'+esc(p.n)+'"><div class="avatar"><img src="'+FACE(AV[p.av])+'" alt="" onerror="this.remove()"></div>'+
-      '<div class="sr-main"><b>'+esc(p.n)+(p.r?' <em>('+esc(p.r)+')</em>':'')+'</b><small>'+esc(p.s)+'</small></div>'+followBtn(followed.has(p.n))+'</div>';
+    return '<div class="sr-person" data-pid="'+p.id+'" data-name="'+esc(p.n)+'"><div class="avatar"><img src="'+FACE(p.av)+'" alt="" onerror="this.remove()"></div>'+
+      '<div class="sr-main"><b>'+esc(p.n)+(p.r?' <em>('+esc(p.r)+')</em>':'')+'</b><small>'+esc(p.s)+'</small></div>'+followBtn(LINKED.has(p.id))+'</div>';
   }
   function renderRail(){
     $('#rTrend').innerHTML='<h3>Trending in Nyabugogo</h3>'+TREND.slice(0,4).map((t,i)=>
@@ -677,10 +722,7 @@ export function initGhetto() {
   $('#rail').addEventListener('click',e=>{
     const fb=e.target.closest('.follow');
     if(fb){
-      const nm=fb.closest('.sr-person').dataset.name,on=!followed.has(nm);
-      on?followed.add(nm):followed.delete(nm);
-      showToast(on?'You linked with '+nm+' 🔗':'You unlinked '+nm);
-      renderRail();if(sSearch.classList.contains('open'))renderSearch();return;
+      toggleLink(fb.closest('.sr-person').dataset.pid);return;
     }
     const tr=e.target.closest('.trend');if(tr){searchFor(tr.dataset.q);return}
     if(e.target.closest('.r-more')){searchFor('');return}
@@ -714,18 +756,15 @@ export function initGhetto() {
   // =====================================================================
   // ROOMS
   // =====================================================================
-  const appEl=$('.app'),roomDetail=$('#roomDetail'),filterSheet=$('#filterSheet'),contactSheet=$('#contactSheet');
+  const appEl=$('.app'),roomDetail=$('#roomDetail'),filterSheet=$('#filterSheet'),contactSheet=$('#contactSheet'),composeSheet=$('#composeSheet');
   let curPage=(document.querySelector('.app')||{dataset:{}}).dataset.page||'home',curRoom=null;
-  const TODAY='2026-10-24';
   const rfmt=n=>n.toLocaleString('en-US');
   const rk=n=>n>=1000?(n/1000)+'k':String(n);
   const dlabel=iso=>new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
   const rimg=(id,w,h)=>'https://images.unsplash.com/'+id+'?w='+w+'&h='+h+'&fit=crop';
   const availTxt=r=>r.from<=TODAY?'Available now':'From '+dlabel(r.from);
   const F={q:'',type:'all',min:0,max:300000,fac:new Set(),ver:false,date:'',sort:'rec',savedOnly:false};
-  let saved=new Set();
-  try{saved=new Set(JSON.parse(localStorage.getItem('ghettoSavedRooms')||'[]'))}catch(e){}
-  const persistSaved=()=>{try{localStorage.setItem('ghettoSavedRooms',JSON.stringify([...saved]))}catch(e){}};
+  const saved=new Set(ROOMS.filter(r=>r.saved).map(r=>r.id));
   const advCount=()=>((F.min>0||F.max<300000)?1:0)+F.fac.size+(F.ver?1:0)+(F.date?1:0);
   const filtersActive=()=>!!(F.q||F.type!=='all'||F.min>0||F.max<300000||F.fac.size||F.ver||F.date||F.savedOnly);
 
@@ -845,8 +884,12 @@ export function initGhetto() {
     $$('[data-heart="'+id+'"]').forEach(b=>{b.classList.toggle('on',on);const ic=$('i',b);if(ic)ic.className=(on?'fa-solid':'fa-regular')+' fa-heart'});
   }
   function toggleSave(id,btn){
-    const on=!saved.has(id);on?saved.add(id):saved.delete(id);persistSaved();
+    const on=!saved.has(id);on?saved.add(id):saved.delete(id);
     syncHearts(id);renderChips();renderSaved();
+    rpc('toggle_saved_room',{p_room:id}).catch(()=>{
+      on?saved.delete(id):saved.add(id);syncHearts(id);renderChips();renderSaved();
+      if(F.savedOnly&&curPage==='rooms')renderRooms(false);fail('Could not save that room');
+    });
     if(on){const el=btn||$('[data-heart="'+id+'"]');if(el){const r=el.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}}
     showToast(on?'Saved to your rooms ❤️':'Removed from saved');
     if(F.savedOnly&&curPage==='rooms')renderRooms(false);
@@ -870,7 +913,7 @@ export function initGhetto() {
   function closeBSheet(s){s.classList.remove('open');s.setAttribute('aria-hidden','true')}
   function setPage(pg){
     curPage=pg;appEl.dataset.page=pg;
-    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);
+    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);closeBSheet(composeSheet);
     if(detail.classList.contains('open'))closePost();
     if(roomDetail.classList.contains('open'))closeRoom();
     $$('.nav-item').forEach(n=>n.classList.toggle('active',n.textContent.trim().toLowerCase()===pg));
@@ -882,12 +925,12 @@ export function initGhetto() {
   // ---- room detail ----
   function stars(n){let s='';for(let i=0;i<5;i++)s+='<i class="fa-'+(i<n?'solid':'regular')+' fa-star"></i>';return s}
   function buildRoom(r){
-    const ll=r.ll,idx=ROOMS.indexOf(r);
+    const ll=r.ll;
     const gal='<div class="rd-gal-wrap"><div class="rd-gal" id="rdGal">'+r.photos.map(id=>'<div class="g-slide"><img src="'+rimg(id,1000,760)+'" alt="'+esc(r.title)+'" onerror="this.remove()"></div>').join('')+'</div>'+
       '<span class="rd-avail">'+availPill(r)+'</span><span class="g-count" id="rdCount">1/'+r.photos.length+'</span>'+
       (r.photos.length>1?'<button class="g-nav prev" data-d="p" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button class="g-nav next" data-d="n" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button><div class="g-dots" id="rdDots">'+r.photos.map((_,k)=>'<i class="'+(k?'':'on')+'"></i>').join('')+'</div>':'')+'</div>';
     const facts=[['Type',RTYPE[r.type]],['Bedrooms',r.beds],['Bathroom',r.bath],['Available',availTxt(r)],['Deposit',r.dep],['Minimum stay',r.min]];
-    const revs=[REVIEWS[idx%3],REVIEWS[(idx+1)%3]];
+    const revs=(r.reviews||[]).slice(0,3);
     const sim=ROOMS.filter(x=>x.id!==r.id&&(x.type===r.type||x.area===r.area)).slice(0,4);
     $('#rdBody').innerHTML=gal+'<div class="rd-pad">'+
       '<div class="rd-tags"><span class="tag">'+RTYPE[r.type]+'</span>'+(ll.ver?'<span class="tag green">Verified landlord</span>':'')+'</div>'+
@@ -897,13 +940,13 @@ export function initGhetto() {
       '<h3 class="rd-h">What\'s included</h3><div class="rd-amen">'+r.fac.map(f=>'<div class="am"><i class="fa-solid '+RFAC[f][1]+'"></i>'+RFAC[f][0]+'</div>').join('')+'</div>'+
       '<h3 class="rd-h">About this room</h3><p class="rd-about">'+esc(r.about)+'</p>'+
       '<div class="rd-facts">'+facts.map(f=>'<div class="fact"><small>'+f[0]+'</small><b>'+esc(String(f[1]))+'</b></div>').join('')+'</div>'+
-      '<div class="rd-ll"><div class="avatar"><img src="'+FACE(AV[ll.av])+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b>'+
-        '<small>'+(ll.ver?'<span class="ok">Verified Landlord</span> · ':'')+'Joined '+ll.joined+'</small><small>Replies '+ll.reply+'</small></div>'+
+      '<div class="rd-ll"><div class="avatar"><img src="'+FACE(ll.av)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b>'+
+        '<small>'+(ll.ver?'<span class="ok">Verified Landlord</span> · ':'')+ll.joined+'</small><small>Replies '+ll.reply+'</small></div>'+
         '<button class="btn-ghost rd-msg">Message</button></div>'+
       '<h3 class="rd-h">Gallery</h3><div class="rd-thumbs">'+r.photos.slice(0,4).map((id,k)=>'<div class="th" data-i="'+k+'"><img src="'+rimg(id,240,240)+'" alt="" onerror="this.remove()">'+(k===3&&r.photos.length>4?'<span class="more">+'+(r.photos.length-4)+'</span>':'')+'</div>').join('')+'</div>'+
       '<h3 class="rd-h">Location</h3><div class="rd-map"><span class="rd-pin-ring"></span><i class="fa-solid fa-location-dot rd-pin"></i>'+
         '<a class="rd-open" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.area+' Kigali Rwanda')+'"><i class="fa-solid fa-map-location-dot"></i>Open in Maps</a></div>'+
-      '<h3 class="rd-h">Reviews</h3><div class="rd-revs">'+revs.map(v=>'<div class="rev"><div class="rev-h"><div class="avatar"><img src="'+FACE(AV[v[1]])+'" alt="" onerror="this.remove()"></div><div><b>'+v[0]+'</b><small>'+v[4]+'</small></div><span class="rev-st">'+stars(v[3])+'</span></div><p>'+esc(v[2])+'</p></div>').join('')+'</div>'+
+      '<h3 class="rd-h">Reviews</h3><div class="rd-revs">'+(revs.length?revs.map(v=>'<div class="rev"><div class="rev-h"><div class="avatar"><img src="'+FACE(v.av)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(v.name)+'</b><small>'+esc(v.when)+'</small></div><span class="rev-st">'+stars(v.rate)+'</span></div><p>'+esc(v.text)+'</p></div>').join(''):'<p class="rd-about">No reviews yet.</p>')+'</div>'+
       (sim.length?'<h3 class="rd-h">Similar rooms</h3><div class="rm-feat rd-sim">'+sim.map(x=>featHTML(x,' sm')).join('')+'</div>':'')+
       '</div>';
     $('#rdTitleTop').textContent=r.title;
@@ -914,7 +957,7 @@ export function initGhetto() {
       '<div class="rr-field"><label for="rrDate">Planned move-in date</label><label class="fp-date"><i class="fa-regular fa-calendar"></i><input type="date" id="rrDate" min="'+TODAY+'" value="'+(r.from>TODAY?r.from:TODAY)+'"></label></div>'+
       '<button type="button" class="rr-btn primary rr-visit"><i class="fa-solid fa-calendar-check"></i>Request a visit</button>'+
       '<button type="button" class="rr-btn ghost rr-contact"><i class="fa-regular fa-comment-dots"></i>Message landlord</button>'+
-      '<div class="rr-ll"><div class="avatar"><img src="'+FACE(AV[ll.av])+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>Replies '+ll.reply+'</small></div></div>'+
+      '<div class="rr-ll"><div class="avatar"><img src="'+FACE(ll.av)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>Replies '+ll.reply+'</small></div></div>'+
       '<p class="rr-note"><i class="fa-solid fa-shield-halved"></i>Visit first. Never pay before you have seen the room and met the landlord.</p></div>'+
       '<section class="r-card"><h3>Similar rooms</h3>'+sim.slice(0,3).map(x=>'<div class="sv" data-room="'+x.id+'"><div class="sv-img"><img src="'+rimg(x.photos[0],120,120)+'" alt="" onerror="this.remove()"></div><div class="sv-t"><b>'+esc(x.title)+'</b><small>'+rfmt(x.price)+' RWF / month · '+esc(x.area)+'</small></div><i class="fa-solid fa-chevron-right"></i></div>').join('')+'</section>';
     const g=$('#rdGal');
@@ -937,7 +980,7 @@ export function initGhetto() {
   }
   function openContact(r){
     if(!r)return;
-    $('#csAv').src=FACE(AV[r.ll.av]);
+    $('#csAv').src=FACE(r.ll.av);
     $('#csName').textContent='Message '+r.ll.name;
     $('#csRoom').textContent=r.title+' · '+rfmt(r.price)+' RWF';
     $('#csMsg').value='Hi '+r.ll.name.split(' ')[0]+', is this room still available?';
@@ -979,7 +1022,7 @@ export function initGhetto() {
     if(e.target.closest('#fpApply')){closeBSheet(filterSheet);$('#rmScroll').scrollTo({top:0,behavior:'smooth'})}
   });
   $('#fpDate').addEventListener('change',e=>{F.date=e.target.value;renderRooms(false)});
-  [filterSheet,contactSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
+  [filterSheet,contactSheet,composeSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
 
   // ---- events: room detail + right column ----
   $('#rdBack').addEventListener('click',closeRoom);
@@ -996,7 +1039,14 @@ export function initGhetto() {
   });
   $('#rRoom').addEventListener('click',e=>{
     if(e.target.closest('.rr-contact')){openContact(curRoom);return}
-    if(e.target.closest('.rr-visit')){showToast('Visit request sent to '+curRoom.ll.name+' 📅');return}
+    if(e.target.closest('.rr-visit')){
+      const d=($('#rrDate')||{}).value||TODAY,room=curRoom,btn=e.target.closest('.rr-visit');
+      btn.disabled=true;
+      rpc('request_room_visit',{p_room:room.id,p_date:d}).then(()=>showToast('Visit request sent to '+room.ll.name+' 📅'))
+        .catch(()=>fail('Could not send your request'))
+        .finally(()=>{btn.disabled=false});
+      return;
+    }
     const sv=e.target.closest('.sv');if(sv)openRoom(sv.dataset.room);
   });
   $('#rSaved').addEventListener('click',e=>{const sv=e.target.closest('.sv');if(sv)openRoom(sv.dataset.room)});
@@ -1004,16 +1054,63 @@ export function initGhetto() {
   // ---- events: contact sheet ----
   $('.cs-quick').addEventListener('click',e=>{const b=e.target.closest('button');if(b){$('#csMsg').value=b.dataset.m;$('#csMsg').focus()}});
   $('#csSend').addEventListener('click',()=>{
-    if(!$('#csMsg').value.trim()){showToast('Write a message first ✍️');return}
-    showToast('Message sent to '+curRoom.ll.name+' 🎉');closeBSheet(contactSheet);
+    const msg=$('#csMsg').value.trim(),room=curRoom,btn=$('#csSend');
+    if(!msg){showToast('Write a message first ✍️');return}
+    btn.disabled=true;
+    rpc('send_room_message',{p_room:room.id,p_body:msg})
+      .then(()=>{showToast('Message sent to '+room.ll.name+' 🎉');closeBSheet(contactSheet)})
+      .catch(()=>fail('Message not sent'))
+      .finally(()=>{btn.disabled=false});
   });
   $('#csCall').addEventListener('click',()=>showToast('Calling '+curRoom.ll.name+' 📞'));
   $('#csWa').addEventListener('click',()=>showToast('Opening WhatsApp 💬'));
   document.addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
+    if(composeSheet.classList.contains('open')){closeBSheet(composeSheet);return}
     if(contactSheet.classList.contains('open')){closeBSheet(contactSheet);return}
     if(filterSheet.classList.contains('open')){closeBSheet(filterSheet);return}
     if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))closeRoom();
+  });
+
+  // ---- new post ----
+  function openCompose(){
+    $('#cpAv').src=FACE(USER);
+    ['#cpTitle','#cpBody','#cpLoc'].forEach(k=>{$(k).value=''});
+    openBSheet(composeSheet);
+    setTimeout(()=>$('#cpTitle').focus(),350);
+  }
+  function postHTML(p){
+    const a=p.author,link=a.linked?'<button class="follow on">'+CHK+'Linked</button>':'<button class="follow">Link</button>';
+    const acts='<div class="post-actions"><button class="action like'+(p.liked?' on':'')+'" data-count="'+(p.likes-(p.liked?1:0))+'"><i class="'+(p.liked?'fa-solid':'fa-regular')+' fa-heart"></i><span>'+p.likes+'</span></button>'+
+      '<button class="action cmt"><i class="fa-regular fa-comment"></i><span>0</span></button><button class="action share"><i class="fa-solid fa-share"></i><span>'+p.shares+'</span></button></div>';
+    const attrs=' data-id="'+p.id+'" data-author="'+a.id+'"'+(p.category?' data-category="'+esc(p.category)+'"':'')+' style="animation-delay:0s"';
+    const img=(id,size)=>'https://images.unsplash.com/'+id+'?'+size+'&fit=crop';
+    if(p.kind==='featured'){
+      let grid='';
+      if(p.photos.length){
+        grid='<div class="photo-grid"><div class="tile main"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=700&h=500')+'"><span class="photo-count">1/'+(p.photoTotal||p.photos.length)+'</span></div></div>';
+      }
+      return '<article class="post featured"'+attrs+'><div class="post-head"><div class="avatar"><img alt="'+esc(a.name)+'" src="'+FACE(a.avatar)+'"></div><div><div class="author">'+esc(a.name)+' '+(a.verified?'<i class="fa-solid fa-circle-check"></i>':'')+'</div>'+
+        '<div class="meta">'+esc(metaOf(p))+'</div></div>'+link+'<button class="more" aria-label="More"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>'+
+        '<div class="post-title">'+esc(p.title)+(p.subtitle?' <small>'+esc(p.subtitle)+'</small>':'')+'</div><div class="post-copy">'+esc(p.body)+'</div>'+grid+acts+'</article>';
+    }
+    return '<article class="post compact"'+attrs+'><div class="compact-row"><div class="compact-body"><div class="head"><div class="avatar"><img alt="'+esc(a.name)+'" src="'+FACE(a.avatar)+'"></div>'+
+      '<div><div class="author">'+esc(a.name)+' <em>('+esc(a.role)+')</em></div><div class="meta">'+esc(metaOf(p))+(p.tag==='New'?' <span class="tag">New</span>':'')+'</div></div>'+link+'</div>'+
+      '<div class="compact-title">'+esc(p.title)+'</div><div class="compact-copy">'+esc(p.body)+'</div></div>'+
+      (p.photos[0]?'<div class="thumb"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=240&h=280')+'"></div>':'')+'</div>'+acts+'</article>';
+  }
+  $('#cpSend').addEventListener('click',()=>{
+    const t=$('#cpTitle').value.trim(),b=$('#cpBody').value.trim(),l=$('#cpLoc').value.trim(),btn=$('#cpSend');
+    if(!t||!b){showToast('Add a title and some text ✍️');return}
+    btn.disabled=true;
+    rpc('create_post',{p_title:t,p_body:b,p_location:l||null}).then(p=>{
+      const wrap=document.createElement('div');wrap.innerHTML=postHTML(p).trim();
+      const art=wrap.firstChild;$('#feed').prepend(art);setupPost(art);
+      closeBSheet(composeSheet);
+      if(curPage!=='home'){setPage('home');try{history.pushState(null,'','/')}catch(e){}}
+      $('#scroll').scrollTo({top:0,behavior:'smooth'});
+      showToast('Posted 🎉');
+    }).catch(()=>fail('Could not post. Try again')).finally(()=>{btn.disabled=false});
   });
 
   renderRooms(false);updateRail();
