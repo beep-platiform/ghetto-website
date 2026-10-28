@@ -4,14 +4,23 @@ export default function RoomsPage() {
     <section className="rooms" id="roomsPage" aria-label="Rooms">
       <div className="rm-scroll" id="rmScroll">
         <header className="rm-top">
-          <div className="rm-title"><b>Rooms</b><small>Find a place that feels like home</small></div>
-          <button className="rm-filterbtn" id="rmFilterBtn" aria-label="Open filters"><i className="fa-solid fa-sliders"></i><span>Filters</span><em id="rmFilterCount"></em></button>
-        </header>
-        <div className="rm-body">
+          <b className="top-title">Rooms</b>
+          <div className="brand">
+            <div className="logo">
+              <svg viewBox="0 0 32 32" aria-hidden="true">
+                <path d="M3 15.5 16 4l13 11.5" stroke="#ffbd16" strokeWidth="3.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M7 14v14h7v-8h5v8h6V14" stroke="#14243c" strokeWidth="2.8" fill="none" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div className="brandname">Ghetto</div>
+          </div>
           <label className="rm-search"><i className="fa-solid fa-magnifying-glass"></i>
-            <input id="rmSearch" type="text" placeholder="Search by area, type or facility..." autoComplete="off" />
+            <input id="rmSearch" type="text" placeholder="Search rooms" aria-label="Search rooms by area, type or facility" autoComplete="off" />
             <button type="button" id="rmSearchClear" aria-label="Clear search"><i className="fa-solid fa-circle-xmark"></i></button>
           </label>
+          <button className="rm-filterbtn" id="rmFilterBtn" aria-label="Open filters"><i className="fa-solid fa-sliders"></i><em id="rmFilterCount"></em></button>
+        </header>
+        <div className="rm-body">
           <div className="rm-chips" id="rmChips"></div>
           <div className="rm-feat-wrap" id="rmFeatWrap">
             <div className="rm-sec"><b>Featured near campus</b><span>Top rated</span></div>

@@ -1065,3 +1065,65 @@ button.st-row:active{background:#eef1f8}
   .au-card{background:transparent;box-shadow:none;border-radius:0;padding:0;max-width:380px}
   .au-brand{margin-bottom:26px}
 }
+
+/* ===== ROOMS: header like Home (logo + search + filter icon), small featured row, 2-column compact cards ===== */
+.rm-top{height:66px;padding:0 14px 0 16px;gap:10px;border-bottom:0}
+.rm-top .top-title{display:none}
+.rm-top .brand{margin-right:0;flex:0 0 auto}
+.rm-top .logo{width:34px;height:34px}
+.rm-top .brandname{font-size:23px}
+.rm-top .rm-search{flex:1 1 auto;min-width:0;height:40px;margin:0;gap:8px;padding:0 4px 0 13px;border-radius:20px;font-size:14px}
+.rm-top .rm-search input{font-size:13.5px}
+.rm-top .rm-search button{width:30px;height:30px;font-size:15px}
+.rm-filterbtn{flex:0 0 auto;width:40px;height:40px;padding:0;border-radius:50%;justify-content:center;font-size:15px;box-shadow:0 8px 16px rgba(16,33,61,.22)}
+.rm-filterbtn em{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;border:2px solid #fff;box-sizing:content-box;font-size:10.5px}
+.rm-body{padding:2px 16px 8px}
+.rm-chips{margin:0 -16px 0;padding:2px 16px 12px;scroll-padding:0 16px}
+.rm-chip{height:36px;padding:0 14px;font-size:13px;border-radius:18px}
+.rm-sec{margin:4px 0 8px}
+.rm-sec b{font-size:16px}
+.rm-sec span{font-size:11.5px}
+#rmFeat{margin:0 -16px;padding:2px 16px 14px;gap:10px;scroll-padding:0 16px}
+#rmFeat .fcard{flex:0 0 148px;height:132px;border-radius:18px;box-shadow:0 8px 18px rgba(16,33,61,.14)}
+#rmFeat .fcard .pill,#rmFeat .fcard .fc-info span{display:none}
+#rmFeat .fc-top{top:8px;left:8px;right:8px;align-items:center}
+.fc-rate{display:none;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:11px;background:rgba(255,255,255,.95);color:var(--ink);font-size:11px;font-weight:800}
+.fc-rate i{color:#ffb400;font-size:10px}
+#rmFeat .fc-rate{display:inline-flex}
+#rmFeat .rc-heart{width:28px;height:28px;font-size:13px;box-shadow:0 4px 10px rgba(0,0,0,.22)}
+#rmFeat .fc-info{left:10px;right:10px;bottom:9px}
+#rmFeat .fc-info b{font-size:12.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#rmFeat .fc-info strong{font-size:12.5px;margin-top:3px}
+#rmFeat .fc-info strong small{font-size:10px}
+.rm-bar{margin:2px 0 10px}
+.rm-count{font-size:15px}
+.rm-count small{font-size:12px}
+.rm-sort{height:36px;font-size:12.5px;border-radius:18px}
+.rm-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 12px}
+.rcard{border-radius:20px;box-shadow:0 6px 18px rgba(24,42,74,.07)}
+.rc-media{aspect-ratio:1/1}
+.rc-top{top:8px;left:8px;right:8px;align-items:center}
+.rc-top .pill{height:22px;padding:0 8px;font-size:10.5px;gap:4px}
+.rc-heart{width:32px;height:32px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+.rc-body{padding:10px 12px 12px}
+.rc-line{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.rc-price{min-width:0;white-space:nowrap}
+.rc-price b{font-size:16px;letter-spacing:-.4px}
+.rc-price small{font-size:10.5px;margin-left:3px}
+.rc-rate{font-size:12px;gap:3px;flex:0 0 auto}
+.rc-rate i{font-size:10.5px}
+.rc-title{margin-top:4px;font-size:13.5px;font-weight:700;letter-spacing:-.2px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rc-ver{margin-left:5px;color:var(--blue);font-size:11px}
+.rc-loc{margin-top:3px;font-size:11.5px;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rc-loc i{font-size:10.5px}
+@media (min-width:760px){
+  .rm-top{height:62px;padding:0 18px;border-bottom:1px solid var(--line)}
+  .rm-top .top-title{display:block}
+  .rm-top .brand{display:none}
+  .rm-top .rm-search{flex:0 1 330px;margin-left:auto;margin-right:0}
+  .rm-body{padding:8px 18px}
+  .rm-chips{margin:0 -18px;padding:2px 18px 12px;scroll-padding:0 18px}
+  #rmFeat{margin:0 -18px;padding:2px 18px 14px;scroll-padding:0 18px}
+  .rm-grid{gap:14px}
+  .rc-media{aspect-ratio:4/3}
+}

@@ -953,18 +953,16 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function availPill(r){const now=r.from<=TODAY;return '<span class="pill '+(now?'now':'soon')+'"><i class="fa-solid '+(now?'fa-circle-check':'fa-calendar-days')+'"></i>'+availTxt(r)+'</span>'}
   function cardHTML(r,i,anim){
     return '<article class="rcard'+(anim?'':' na')+'" data-room="'+r.id+'" style="--i:'+i+'">'+
-      '<div class="rc-media"><img src="'+rimg(r.photos[0],640,480)+'" alt="'+esc(r.title)+'" loading="lazy" onerror="this.remove()">'+
-      '<div class="rc-top">'+availPill(r)+heartBtn(r)+'</div><span class="rc-count"><i class="fa-solid fa-camera"></i>'+r.photos.length+'</span></div>'+
-      '<div class="rc-body"><h3 class="rc-title">'+esc(r.title)+'</h3>'+
-      '<div class="rc-loc"><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+' · '+r.km+' km from campus</div>'+
-      '<div class="rc-fac">'+r.fac.slice(0,4).map(f=>'<span title="'+RFAC[f][0]+'"><i class="fa-solid '+RFAC[f][1]+'"></i></span>').join('')+
-      (r.ll.ver?'<em class="ver"><i class="fa-solid fa-circle-check"></i>Verified</em>':'')+'</div>'+
-      '<div class="rc-foot"><div class="rc-price"><b>'+rfmt(r.price)+' RWF</b><small>/ month</small></div>'+
-      '<div class="rc-rate"><i class="fa-solid fa-star"></i>'+r.rate+'<small>('+r.rev+')</small></div></div></div></article>';
+      '<div class="rc-media"><img src="'+rimg(r.photos[0],480,400)+'" alt="'+esc(r.title)+'" loading="lazy" onerror="this.remove()">'+
+      '<div class="rc-top">'+availPill(r)+heartBtn(r)+'</div></div>'+
+      '<div class="rc-body"><div class="rc-line"><div class="rc-price"><b>'+rfmt(r.price)+'</b><small>RWF/mo</small></div>'+
+      '<div class="rc-rate"><i class="fa-solid fa-star"></i>'+r.rate+'</div></div>'+
+      '<h3 class="rc-title">'+esc(r.title)+(r.ll.ver?'<i class="fa-solid fa-circle-check rc-ver" title="Verified landlord"></i>':'')+'</h3>'+
+      '<div class="rc-loc"><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+' · '+r.km+' km</div></div></article>';
   }
   function featHTML(r,cls){
     return '<article class="fcard'+(cls||'')+'" data-room="'+r.id+'"><img src="'+rimg(r.photos[0],600,420)+'" alt="" loading="lazy" onerror="this.remove()">'+
-      '<div class="fc-top">'+availPill(r)+heartBtn(r)+'</div><div class="fc-info"><b>'+esc(r.title)+'</b>'+
+      '<div class="fc-top">'+availPill(r)+'<span class="fc-rate"><i class="fa-solid fa-star"></i>'+r.rate+'</span>'+heartBtn(r)+'</div><div class="fc-info"><b>'+esc(r.title)+'</b>'+
       '<span><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+'</span><strong>'+rfmt(r.price)+' RWF <small>/ month</small></strong></div></article>';
   }
   function roomRowHTML(r){
