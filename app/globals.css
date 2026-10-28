@@ -1058,3 +1058,10 @@ button.st-row:active{background:#eef1f8}
   .st-pane .st-group{margin-bottom:0;box-shadow:none}
   .st-pane .st-row{padding:13px 14px}
 }
+
+/* Phones: no card border/shadow around the login form — it sits straight on the page (the card look is desktop only) */
+@media (max-width:759px){
+  .au{background:#fff;padding:36px 24px 32px}
+  .au-card{background:transparent;box-shadow:none;border-radius:0;padding:0;max-width:380px}
+  .au-brand{margin-bottom:26px}
+}
