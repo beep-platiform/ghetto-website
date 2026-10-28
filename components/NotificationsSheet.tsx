@@ -11,7 +11,10 @@ export default function NotificationsSheet() {
         <button type="button" className="tab on" data-tab="all">All</button>
         <button type="button" className="tab" data-tab="unread">Unread<span className="tc" id="nUnreadCount"></span></button>
       </div>
-      <div className="sh-body" id="nBody"></div>
+      <div className="sh-body" id="nBody">
+        <div id="nList"></div>
+        <div className="more" id="nMore" hidden><span className="more-sp"></span></div>
+      </div>
     </section>
   );
 }

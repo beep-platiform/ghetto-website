@@ -33,6 +33,7 @@ export default function RoomsPage() {
             <p>Try a wider price range or remove a filter.</p>
             <button type="button" className="rm-clear">Clear filters</button>
           </div>
+          <div className="more" id="rmMore" hidden><span className="more-sp"></span></div>
           <div className="rm-end">You've seen all the rooms ✨</div>
         </div>
       </div>

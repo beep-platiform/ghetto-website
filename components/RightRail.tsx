@@ -8,6 +8,8 @@ export default function RightRail() {
       <section className="r-card" id="rTrend"></section>
       <section className="r-card" id="rPeople"></section>
       <footer className="r-foot">About · Help · Terms · Privacy<br />© 2026 Ghetto · Live. Learn. Grow...</footer>
+      <div className="r-profile" id="rProfile"></div>
+      <div className="r-settings" id="rSettings"></div>
       <div className="r-comments" id="rComments" aria-label="Comments">
         <div id="rcHead"></div>
         <div className="rc-scroll" id="rcScroll"></div>

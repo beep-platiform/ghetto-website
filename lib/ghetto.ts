@@ -15,10 +15,33 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>[...c.querySelectorAll(s)];
 
+  // ---- load-more-on-scroll: one helper for every list (feed, notifications, rooms, profile posts) ----
+  // el = the sentinel at the end of the list, root = the scrolling box, can() = is there more, load() = fetch the next page
+  function infinite(el,root,can,load){
+    let busy=false,wait=0;
+    const near=()=>{
+      if(!el||!el.offsetParent)return false;
+      const r=el.getBoundingClientRect(),b=root.getBoundingClientRect();
+      return r.top<b.bottom+500&&r.bottom>b.top-50;
+    };
+    const run=()=>{
+      if(busy||Date.now()<wait||!can()||!near())return;
+      busy=true;el.classList.add('busy');
+      Promise.resolve(load()).catch(()=>{wait=Date.now()+4000}).finally(()=>{busy=false;el.classList.remove('busy');setTimeout(run,80)});
+    };
+    if('IntersectionObserver' in window)new IntersectionObserver(run,{root:root,rootMargin:'0px 0px 500px 0px'}).observe(el);
+    root.addEventListener('scroll',run,{passive:true});
+    return run;
+  }
+
   // ---- data from the database ----
   const ORDER=DATA.stories.map(s=>s.id),STORIES={};
   DATA.stories.forEach(s=>{STORIES[s.id]={name:s.name,time:s.time,slides:s.slides}});
   const COMMENTS=DATA.comments,PEOPLE=DATA.people,TREND=DATA.trending,NOTIFS=DATA.notifications,ROOMS=DATA.rooms,TODAY=DATA.today;
+  // comments load when a post is opened (one call per post); until then a post only knows its count + top comment
+  const PMETA={},LOADED=new Set(),DETACHED={};
+  let feedRun=null,railReady=false; // set once the page is fully wired
+  DATA.posts.forEach(p=>{PMETA[p.id]={n:p.cmtCount||0,top:p.top||null}});
   let USER=DATA.me.avatar;
   const ME=DATA.me,HANDLES=DATA.handles||{},SHANDLES=DATA.storyHandles||{};
   HANDLES[ME.id]=ME.handle;
@@ -219,19 +242,26 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function refreshPreview(art){refreshPreview0(art);mirror(art)}
   function refreshPreview0(art){
-    const id=art.dataset.id,arr=COMMENTS[id],pc=$('.pc',art),n=totalOf(id);
+    const id=art.dataset.id,pc=$('.pc',art);
+    let n,top;
+    if(LOADED.has(id)){
+      const arr=COMMENTS[id];n=totalOf(id);
+      top=arr.length?arr.reduce((m,c)=>c.likes>m.likes?c:m,arr[0]):null;
+    }else{const m=PMETA[id]||{n:0,top:null};n=m.n;top=m.top}
     const cs=$('.action.cmt span',art);if(cs)cs.textContent=n;
-    if(!arr.length){pc.innerHTML='<button class="pc-all" type="button">Be the first to comment</button>';return}
-    const top=arr.reduce((m,c)=>c.likes>m.likes?c:m,arr[0]);
+    if(!n||!top){pc.innerHTML='<button class="pc-all" type="button">Be the first to comment</button>';return}
     pc.innerHTML='<button class="pc-row" type="button"><span class="pc-av"><img src="'+FACE(top.av)+'" alt="" onerror="this.remove()"></span>'+
       '<span class="pc-text"><b>'+esc(top.name)+'</b>'+esc(top.text)+'</span>'+
       '<span class="pc-like"><i class="fa-solid fa-heart"></i>'+top.likes+'</span></button>'+
       '<button class="pc-all" type="button">View all '+plural(n)+'</button>';
   }
   function setupPost(a){
-    if(!COMMENTS[a.dataset.id])COMMENTS[a.dataset.id]=[];
     const pc=document.createElement('div');pc.className='pc';a.appendChild(pc);
     refreshPreview(a);
+  }
+  function ensureComments(id){
+    if(LOADED.has(id))return Promise.resolve();
+    return rpc('get_comments',{p_post:id}).then(arr=>{COMMENTS[id]=arr||[];LOADED.add(id)});
   }
   $$('#feed .post').forEach(setupPost);
 
@@ -303,7 +333,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const lb=$('.d-act.like',dPost);lb.classList.toggle('on',on);$('i',lb).className=on?'fa-solid fa-heart':'fa-regular fa-heart';
     $('#dLikes').textContent=n+(n==='1'?' like':' likes');
     const fb=$('.follow',curArt),df=$('[data-act="follow"]',dPost);df.className=fb.className;df.innerHTML=fb.innerHTML;
-    const total=totalOf(curId);
+    const total=LOADED.has(curId)?totalOf(curId):(PMETA[curId]?PMETA[curId].n:0);
     $('#dCmtTxt').textContent=plural(total);$('#dCount').textContent=total;
   }
 
@@ -362,7 +392,19 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     curArt=art;curId=art.dataset.id;sortMode='top';replyTo=null;
     $('#dReplying').classList.remove('show');dInput.value='';dInput.placeholder='Add a comment...';dSend.classList.remove('ready');
     $('#dSortLabel').textContent='Top comments';
-    buildPost(art);computeOrder();renderList();
+    const pid=curId;
+    if(!LOADED.has(pid))COMMENTS[pid]=[];
+    buildPost(art);
+    if(LOADED.has(pid)){computeOrder();renderList()}
+    else{
+      order=[];
+      dList.innerHTML='<div class="d-empty">Loading comments…</div>';
+      ensureComments(pid).then(()=>{
+        if(curId!==pid||!curArt)return;
+        computeOrder();renderList();syncDetail();layoutComments();
+        if(mode==='comments')setTimeout(scrollToComments,150);
+      }).catch(()=>{if(curId===pid)dList.innerHTML='<div class="d-empty">Could not load comments<small>Close this post and open it again.</small></div>'});
+    }
     detail.classList.add('open');detail.setAttribute('aria-hidden','false');
     dScroll.style.scrollBehavior='auto';dScroll.scrollTop=0;dScroll.style.scrollBehavior='';
     layoutComments();$('#rcScroll').scrollTop=0;
@@ -385,6 +427,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function cancelReply(){replyTo=null;$('#dReplying').classList.remove('show');dInput.placeholder='Add a comment...'}
   function submitComment(){
     const v=dInput.value.trim();if(!v||!curArt)return;
+    if(!LOADED.has(curId)){showToast('Loading comments… try again in a second');return}
     const postId=curId,arr=COMMENTS[postId],parentId=replyTo?replyTo.id:null;
     const item={id:-(++uid),name:'You',av:USER,t:0,likes:0,liked:false,mine:true,text:v,open:false,replies:[]};
     const tmp=item.id;newId=tmp;
@@ -613,67 +656,142 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   });
 
   // ---- notifications ----
-  let nTab='all',nIdx=0;
-  const unreadCount=()=>NOTIFS.filter(n=>n.unread).length;
+  // What people do (like, comment, link, visit, message) is turned into notifications by the database.
+  //  - while you are online they arrive one by one (the app asks for anything new every few seconds)
+  //  - what happened while you were away comes combined per post ("Aline, Emerson and 3 others liked your post")
+  //  - only the first page is loaded; the next pages load when you scroll to the end of the list. No repeats.
+  const NSESS=DATA.notifSession,PAGE_N=10;
+  let nTab='all',nIdx=0,UNREAD=DATA.notifUnread||0,NMAX=DATA.notifMaxId||0,nPolling=false;
+  const NT={
+    all:{items:NOTIFS,ids:new Set(NOTIFS.map(n=>n.id)),next:DATA.notifNext||null,done:!DATA.notifNext,busy:false,loaded:true},
+    unread:{items:[],ids:new Set(),next:null,done:false,busy:false,loaded:false}
+  };
+  const nList=$('#nList'),nMore=$('#nMore');
+  const unreadCount=()=>UNREAD;
   function updateBell(){
-    const c=unreadCount(),d=$('#bellDot');
-    d.textContent=c;d.style.display=c?'grid':'none';
-    const sb=$('#sideBellDot');if(sb){sb.textContent=c;sb.style.display=c?'grid':'none'}
+    const c=UNREAD,d=$('#bellDot'),t=c>99?'99+':c;
+    d.textContent=t;d.style.display=c?'grid':'none';
+    const sb=$('#sideBellDot');if(sb){sb.textContent=t;sb.style.display=c?'grid':'none'}
     $('#nUnreadCount').textContent=c||'';
     $('#markAll').disabled=!c;
-  }
-  function thumbOf(id){
-    const a=$('#feed .post[data-id="'+id+'"]');if(!a)return '';
-    const i=info(a);return i.photos[0]||'';
   }
   function notifHTML(n){
     let right='';
     if(n.fb)right='<button type="button" class="follow n-follow'+(LINKED.has(n.actor)?' on':'')+'" data-pid="'+n.actor+'">'+(LINKED.has(n.actor)?CHK+'Linked':'Link back')+'</button>';
-    else if(n.post){const im=thumbOf(n.post);right='<div class="n-thumb">'+(im?'<img src="'+im+'" alt="" onerror="this.remove()">':'')+'</div>'}
-    return '<div class="n-item'+(n.unread?' unread':'')+'" data-id="'+n.id+'" style="--i:'+(nIdx++)+'">'+
+    else if(n.post){right='<div class="n-thumb">'+(n.photo?'<img src="'+rimg(n.photo,120,120)+'" alt="" onerror="this.remove()">':'')+'</div>'}
+    return '<div class="n-item'+(n.unread?' unread':'')+(n.count>1?' grouped':'')+'" data-id="'+n.id+'" style="--i:'+(Math.min(nIdx++,12))+'">'+
       '<div class="n-av"><img src="'+FACE(n.av)+'" alt="" onerror="this.remove()"><span class="n-badge t-'+n.t+'"><i class="fa-solid '+ICON[n.t]+'"></i></span></div>'+
       '<div class="n-main"><p>'+n.html+'</p>'+(n.quote?'<span class="n-quote">“'+esc(n.quote)+'”</span>':'')+'<span class="n-time">'+n.time+'</span></div>'+
       right+'<span class="n-dot"></span></div>';
   }
+  const nEmpty=()=>'<div class="d-empty"><div class="s-emoji">'+(nTab==='unread'?'🎉':'🔔')+'</div>'+(nTab==='unread'?'You\'re all caught up':'No notifications yet')+'<small>'+(nTab==='unread'?'New activity will show up here.':'When people like, comment or link with you, you will see it here.')+'</small></div>';
+  function paintNMore(){
+    const t=NT[nTab];
+    nMore.hidden=t.done&&!t.busy;
+    nMore.classList.toggle('busy',t.busy);
+  }
   function renderNotifs(){
     nIdx=0;
-    const list=NOTIFS.filter(n=>nTab==='all'||n.unread);
-    let h='';
-    ['New','Earlier'].forEach(g=>{
-      const items=list.filter(n=>n.g===g);
-      if(items.length)h+=sec(g)+items.map(notifHTML).join('');
-    });
-    if(!h)h='<div class="d-empty"><div class="s-emoji">🎉</div>You\'re all caught up<small>New activity will show up here.</small></div>';
-    nBody.innerHTML=h;
+    const t=NT[nTab];
+    nList.innerHTML=t.items.length?t.items.map(notifHTML).join(''):(t.done?nEmpty():'');
     $$('#nTabs .tab').forEach(tb=>tb.classList.toggle('on',tb.dataset.tab===nTab));
-    updateBell();
+    updateBell();paintNMore();
+  }
+  // next page of the open tab (all = everything, unread = only the unread ones)
+  function loadNotifs(tab){
+    const t=NT[tab];
+    if(t.busy||t.done)return Promise.resolve();
+    t.busy=true;if(tab===nTab)paintNMore();
+    const cur=t.next;
+    return rpc('get_notifications',{p_limit:PAGE_N,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null,p_unread:tab==='unread',p_session:NSESS}).then(r=>{
+      const add=r.items.filter(n=>!t.ids.has(n.id));
+      add.forEach(n=>{t.ids.add(n.id);if(n.actor){PNAME[n.actor]=n.name;if(n.linked)LINKED.add(n.actor)}});
+      t.items.push(...add);t.next=r.next||null;t.done=!r.next;t.loaded=true;
+      UNREAD=r.unread;
+      if(tab===nTab){
+        if(nList.querySelector('.d-empty'))nList.innerHTML='';
+        nList.insertAdjacentHTML('beforeend',add.map(notifHTML).join(''));
+        if(!t.items.length)nList.innerHTML=nEmpty();
+      }
+      updateBell();
+    }).finally(()=>{t.busy=false;if(tab===nTab)paintNMore()});
+  }
+  const nRun=infinite(nMore,nBody,()=>!NT[nTab].done&&sNotif.classList.contains('open'),()=>loadNotifs(nTab));
+  function openNotifs(){
+    nTab='all';renderNotifs();nBody.scrollTop=0;openSheet(sNotif);
+    setTimeout(nRun,60);
+  }
+  function setTab(tab){
+    nTab=tab;nBody.scrollTop=0;renderNotifs();
+    if(!NT[tab].loaded||(!NT[tab].items.length&&!NT[tab].done))loadNotifs(tab).catch(()=>fail('Could not load notifications'));
+    else setTimeout(nRun,60);
   }
   function markRead(n,el){
     if(!n.unread)return;
-    n.unread=false;if(el)el.classList.remove('unread');updateBell();
-    rpc('mark_notification_read',{p_id:+n.id}).catch(()=>{});
+    n.unread=false;
+    ['all','unread'].forEach(k=>NT[k].items.forEach(x=>{if(x.id===n.id)x.unread=false}));
+    if(el)el.classList.remove('unread');
+    UNREAD=Math.max(0,UNREAD-(n.count||1));updateBell();
+    rpc('mark_notifications_read',{p_ids:n.ids||[+n.id]}).then(c=>{if(typeof c==='number'){UNREAD=c;updateBell()}}).catch(()=>{});
   }
-  $('#bellBtn').addEventListener('click',()=>{nTab='all';renderNotifs();nBody.scrollTop=0;openSheet(sNotif)});
-  $('#nTabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b)return;nTab=b.dataset.tab;renderNotifs()});
+  $('#bellBtn').addEventListener('click',openNotifs);
+  $('#nTabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b)return;setTab(b.dataset.tab)});
   $('#markAll').addEventListener('click',()=>{
-    NOTIFS.forEach(n=>n.unread=false);
+    ['all','unread'].forEach(k=>NT[k].items.forEach(n=>n.unread=false));
+    UNREAD=0;
     rpc('mark_all_notifications_read').catch(()=>{});
-    $$('#nBody .n-item').forEach(el=>el.classList.remove('unread'));
+    $$('#nList .n-item').forEach(el=>el.classList.remove('unread'));
     updateBell();showToast('All caught up ✅');
-    if(nTab==='unread')setTimeout(renderNotifs,350);
+    if(nTab==='unread')setTimeout(()=>{NT.unread.items=[];NT.unread.ids=new Set();NT.unread.next=null;NT.unread.done=true;NT.unread.loaded=true;renderNotifs()},350);
   });
+  // a post may not be on the page yet (it is older than what has loaded): fetch just that one
+  function openPostById(id,mode){
+    let art=$('#feed .post[data-id="'+id+'"]')||DETACHED[id];
+    if(art){openPost(art,mode);return}
+    rpc('get_post',{p_post:id}).then(p=>{
+      if(!p){showToast('That post is no longer available');return}
+      art=makePosts([p])[0];setupPost(art);DETACHED[id]=art;openPost(art,mode);
+    }).catch(()=>fail('Could not open that post'));
+  }
   nBody.addEventListener('click',e=>{
     const el=e.target.closest('.n-item');if(!el)return;
-    const n=NOTIFS.find(x=>x.id===el.dataset.id);if(!n)return;
+    const n=NT[nTab].items.find(x=>x.id===el.dataset.id);if(!n)return;
     const fb=e.target.closest('.n-follow');
     if(fb){
       toggleLink(n.actor);
       markRead(n,el);return;
     }
     markRead(n,el);
-    if(n.post){const art=$('#feed .post[data-id="'+n.post+'"]');if(art)openPost(art,n.cm?'comments':'top')}
+    if(n.post)openPostById(n.post,n.cm?'comments':'top');
     else if(n.actor)openProfile(HANDLES[n.actor]);
   });
+  // ---- while the app is open: ask for anything new every few seconds, show each one on its own ----
+  const plain=h=>String(h).replace(/<[^>]+>/g,'');
+  function pollNotifs(){
+    if(nPolling||document.hidden)return;
+    nPolling=true;
+    rpc('poll_notifications',{p_after:NMAX}).then(r=>{
+      NMAX=Math.max(NMAX,r.maxId||0);UNREAD=r.unread;
+      const fresh=r.items.filter(n=>!NT.all.ids.has(n.id));
+      if(fresh.length){
+        fresh.forEach(n=>{n.g='New';if(n.actor){PNAME[n.actor]=n.name;if(n.linked)LINKED.add(n.actor)}});
+        NT.all.items.unshift(...fresh);fresh.forEach(n=>NT.all.ids.add(n.id));
+        if(NT.unread.loaded){const fu=fresh.filter(n=>n.unread&&!NT.unread.ids.has(n.id));NT.unread.items.unshift(...fu);fu.forEach(n=>NT.unread.ids.add(n.id))}
+        if(sNotif.classList.contains('open')){
+          const em=nList.querySelector('.d-empty');if(em)nList.innerHTML='';
+          const sh=nBody.scrollTop;nIdx=0;
+          nList.insertAdjacentHTML('afterbegin',fresh.filter(n=>nTab==='all'||n.unread).map(notifHTML).join(''));
+          if(sh>40)nBody.scrollTop=sh; // keep reading where you were
+        }
+        const first=fresh[0];
+        showToast(plain(first.html)+(fresh.length>1?' · +'+(fresh.length-1)+' more':''));
+        const bell=$('#bellBtn');bell.classList.remove('ring');void bell.offsetWidth;bell.classList.add('ring');
+      }
+      updateBell();
+    }).catch(()=>{}).finally(()=>{nPolling=false});
+  }
+  setInterval(pollNotifs,15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollNotifs()});
   updateBell();
 
   // ===== DESKTOP: sidebar, right rail, story dismiss =====
@@ -740,7 +858,16 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#rail').addEventListener('click',e=>{
     const fb=e.target.closest('.follow');
     if(fb){
-      toggleLink(fb.closest('.sr-person').dataset.pid);return;
+      const pr0=fb.closest('.sr-person');if(pr0)toggleLink(pr0.dataset.pid);return;
+    }
+    const rp=e.target.closest('[data-rp]');
+    if(rp){
+      if(rp.dataset.rp==='post')openPostById(rp.dataset.id,'top');
+      else if(rp.dataset.rp==='room')openRoom(rp.dataset.id);
+      else if(rp.dataset.rp==='posts'){pfTab='posts';renderPfList();pfScroll.scrollTo({top:0,behavior:'smooth'})}
+      else if(rp.dataset.rp==='rooms'){pfTab='rooms';renderPfList();$('#pfTabs').scrollIntoView({behavior:'smooth',block:'start'})}
+      else openLinksSheet(rp.dataset.rp);
+      return;
     }
     const tr=e.target.closest('.trend');if(tr){searchFor(tr.dataset.q);return}
     if(e.target.closest('.r-more')){searchFor('');return}
@@ -783,6 +910,20 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const availTxt=r=>r.from<=TODAY?'Available now':'From '+dlabel(r.from);
   const F={q:'',type:'all',min:0,max:300000,fac:new Set(),ver:false,date:'',sort:'rec',savedOnly:false};
   const saved=new Set(ROOMS.filter(r=>r.saved).map(r=>r.id));
+  // rooms: the first page came with the page; the rest loads when you reach the end of the list
+  let ROOMSNEXT=DATA.roomsNext||null,roomsRun=null;
+  function loadRooms(){
+    if(!ROOMSNEXT)return Promise.resolve();
+    const cur=ROOMSNEXT;
+    return rpc('get_rooms',{p_limit:6,p_after:cur.after}).then(r=>{
+      const have=new Set(ROOMS.map(x=>x.id));
+      r.rooms.filter(x=>!have.has(x.id)).forEach(x=>{ROOMS.push(x);if(x.saved)saved.add(x.id)});
+      ROOMSNEXT=r.next||null;
+      renderRooms(false);
+    });
+  }
+  // some views need every room (a landlord's rooms, your saved rooms): load the rest in a row
+  function loadAllRooms(){return ROOMSNEXT?loadRooms().then(loadAllRooms):Promise.resolve()}
   const advCount=()=>((F.min>0||F.max<300000)?1:0)+F.fac.size+(F.ver?1:0)+(F.date?1:0);
   const filtersActive=()=>!!(F.q||F.type!=='all'||F.min>0||F.max<300000||F.fac.size||F.ver||F.date||F.savedOnly);
 
@@ -878,8 +1019,10 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const ac=activeChips();
     $('#rmActive').innerHTML=ac.length?ac.map(c=>'<span class="af">'+esc(c[1])+'<button type="button" data-k="'+esc(c[0])+'" aria-label="Remove filter"><i class="fa-solid fa-xmark"></i></button></span>').join('')+'<button type="button" class="af-clear">Clear all</button>':'';
     $('#rmGrid').innerHTML=list.map((r,i)=>cardHTML(r,i,anim)).join('');
-    $('#rmEmpty').hidden=list.length>0;
-    $('.rm-end').hidden=list.length===0;
+    $('#rmEmpty').hidden=list.length>0||!!ROOMSNEXT;
+    $('#rmMore').hidden=!ROOMSNEXT;
+    $('.rm-end').hidden=list.length===0||!!ROOMSNEXT;
+    setTimeout(()=>{if(roomsRun)roomsRun()},60);
     const n=advCount(),b=$('#rmFilterCount');b.textContent=n||'';b.style.display=n?'grid':'none';
     $('#rmSearchClear').style.display=F.q?'grid':'none';
     syncPanel(list.length);renderSaved();
@@ -924,6 +1067,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     rail.classList.toggle('comments-mode',comments);
     rail.classList.toggle('room-mode',room);
     rail.classList.toggle('rooms-mode',rooms);
+    rail.classList.toggle('profile-mode',wide&&!comments&&!room&&curPage==='profile');
+    rail.classList.toggle('settings-mode',wide&&!comments&&!room&&curPage==='settings');
+    if(railReady&&wide&&curPage==='profile')renderRailProfile();
     const host=(wide&&curPage==='rooms')?$('#rfHost'):$('#fsBody'),fp=$('#filterPanel');
     if(fp.parentNode!==host)host.appendChild(fp);
     if(wide)closeBSheet(filterSheet);
@@ -940,6 +1086,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const ss=$('.s-item[data-page="settings"]');if(ss)ss.classList.toggle('active',pg==='settings');
     if(pg==='rooms'){renderRooms(true);$('#rmScroll').scrollTop=0}
     updateRail();
+    if(pg==='home'&&feedRun)setTimeout(feedRun,80);
   }
 
   // ---- room detail ----
@@ -1110,7 +1257,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(p.kind==='featured'){
       let grid='';
       if(p.photos.length){
-        grid='<div class="photo-grid"><div class="tile main"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=700&h=500')+'"><span class="photo-count">1/'+(p.photoTotal||p.photos.length)+'</span></div></div>';
+        grid='<div class="photo-grid"><div class="tile main"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=700&h=500')+'">'+(p.sign?'<span class="sign">'+esc(p.sign)+'</span>':'')+'<span class="photo-count">1/'+(p.photoTotal||p.photos.length)+'</span></div>'+
+          (p.photos[1]?'<div class="tile t2"><img alt="" src="'+img(p.photos[1],'w=350&h=250')+'"></div>':'')+
+          (p.photos[2]?'<div class="tile t3"><img alt="" src="'+img(p.photos[2],'w=350&h=250')+'">'+(p.moreCount>0?'<div class="more-mask">+'+p.moreCount+'</div>':'')+'</div>':'')+'</div>';
       }
       return '<article class="post featured"'+attrs+'><div class="post-head"><div class="avatar"><img alt="'+esc(a.name)+'" src="'+FACE(a.avatar)+'"></div><div><div class="author">'+esc(a.name)+' '+(a.verified?'<i class="fa-solid fa-circle-check"></i>':'')+'</div>'+
         '<div class="meta">'+esc(metaOf(p))+'</div></div>'+link+'<button class="more" aria-label="More"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>'+
@@ -1121,13 +1270,40 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       '<div class="compact-title">'+esc(p.title)+'</div><div class="compact-copy">'+esc(p.body)+'</div></div>'+
       (p.photos[0]?'<div class="thumb"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=240&h=280')+'"></div>':'')+'</div>'+acts+'</article>';
   }
+  // posts from the database -> elements (remembers the people + the comment preview, which setupPost draws)
+  function makePosts(list){
+    return list.map(p=>{
+      PMETA[p.id]={n:p.cmtCount||0,top:p.top||null};
+      PNAME[p.author.id]=p.author.name;
+      if(p.author.linked)LINKED.add(p.author.id);
+      const w=document.createElement('div');w.innerHTML=postHTML(p).trim();
+      return w.firstChild;
+    });
+  }
+  // ---- home feed: the first page came with the page, the rest loads as you scroll ----
+  let FEEDNEXT=DATA.feedNext||null;
+  const feedMore=$('#feedMore'),feedEl=$('#feed');
+  const paintFeedMore=()=>{if(feedMore)feedMore.classList.toggle('done',!FEEDNEXT)};
+  function loadFeed(){
+    if(!FEEDNEXT)return Promise.resolve();
+    const cur=FEEDNEXT;
+    return rpc('get_feed',{p_limit:8,p_ts:cur.ts,p_id:cur.id}).then(r=>{
+      const fresh=r.posts.filter(p=>!feedEl.querySelector('.post[data-id="'+p.id+'"]'));
+      makePosts(fresh).forEach(a=>{feedEl.appendChild(a);setupPost(a)});
+      FEEDNEXT=r.next||null;paintFeedMore();
+    });
+  }
+  paintFeedMore();
+  feedRun=infinite(feedMore,$('#scroll'),()=>!!FEEDNEXT&&curPage==='home',loadFeed);
+
   $('#cpSend').addEventListener('click',()=>{
     const t=$('#cpTitle').value.trim(),b=$('#cpBody').value.trim(),l=$('#cpLoc').value.trim(),btn=$('#cpSend');
     if(!t||!b){showToast('Add a title and some text ✍️');return}
     btn.disabled=true;
     rpc('create_post',{p_title:t,p_body:b,p_location:l||null}).then(p=>{
-      const wrap=document.createElement('div');wrap.innerHTML=postHTML(p).trim();
-      const art=wrap.firstChild;$('#feed').prepend(art);setupPost(art);
+      const art=makePosts([p])[0];$('#feed').prepend(art);setupPost(art);
+      const pp=curProfile&&curProfile.isMe&&curProfile._pp;
+      if(pp){const a2=makePosts([p])[0];const em=$('.pf-empty',pp.el);if(em)em.remove();pp.el.prepend(a2);setupPost(a2)}
       closeBSheet(composeSheet);
       if(curPage!=='home'){setPage('home');try{history.pushState(null,'','/')}catch(e){}}
       $('#scroll').scrollTo({top:0,behavior:'smooth'});
@@ -1136,6 +1312,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     }).catch(()=>fail('Could not post. Try again')).finally(()=>{btn.disabled=false});
   });
 
+  roomsRun=infinite($('#rmMore'),$('#rmScroll'),()=>!!ROOMSNEXT&&curPage==='rooms',loadRooms);
   renderRooms(false);updateRail();
   // =====================================================================
   // PROFILE PAGE
@@ -1186,7 +1363,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       '<button type="button" data-st="linking"><b id="pfStLinking">'+countTxt(p.linking)+'</b><small>Linking</small></button></div></div>'+
       '<div class="tabs pf-tabs" id="pfTabs">'+tabs.map(t=>'<button type="button" class="tab'+(t[0]===pfTab?' on':'')+'" data-pt="'+t[0]+'">'+t[1]+'<span class="tc">'+t[2]+'</span></button>').join('')+'</div>'+
       '<div id="pfList"></div>';
-    renderPfList();
+    renderPfList();renderRailProfile();
     const mine=p.isMe;
     $$('.nav-item').forEach(n=>{if(n.textContent.trim()==='Profile')n.classList.toggle('active',mine)});
     const si=$('.s-item[data-page="profile"]');if(si)si.classList.toggle('active',mine);
@@ -1202,23 +1379,50 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       return;
     }
     if(pfTab==='posts'){
-      const els=$$('#feed .post').filter(a=>a.dataset.author===p.id);
-      list.className='feed pf-list';list.innerHTML='';
-      if(!els.length){
-        list.innerHTML='<div class="pf-empty"><div class="s-emoji">✍️</div><b>No posts yet</b>'+(p.isMe?'Share a tip, a room or a price with the community.<br><button type="button" class="pf-btn" data-pf="compose"><i class="fa-solid fa-pen"></i><span>Write a post</span></button>':esc(p.name.split(' ')[0])+' has not posted anything yet.')+'</div>';
-      }else els.forEach(a=>{const c=a.cloneNode(true);c.style.animationDelay='0s';list.appendChild(c)});
+      // the posts of this person load a page at a time and stay in their own box, so switching tabs does not lose your place
+      const pp=p._pp||(p._pp={el:document.createElement('div'),next:null,done:false,started:false,busy:false});
+      pp.el.className='feed pf-list';list.className='';list.innerHTML='';list.appendChild(pp.el);
+      if(!pp.started){pp.started=true;loadPfPosts(p).catch(()=>{pp.started=false;fail('Could not load posts')})}
+      else paintPfEmpty(p);
+      paintPfMore();
       return;
     }
+    if(ROOMSNEXT)loadAllRooms().then(()=>{if(curProfile===p&&pfTab!=='posts')renderPfList()}).catch(()=>{});
     const rooms=pfTab==='rooms'?roomsOf(p):ROOMS.filter(r=>saved.has(r.id));
     list.className='pf-rooms';
     list.innerHTML=rooms.length?'<div class="rm-grid">'+rooms.map((r,i)=>cardHTML(r,i,false)).join('')+'</div>'
       :'<div class="pf-empty"><div class="s-emoji">'+(pfTab==='saved'?'❤️':'🏠')+'</div><b>'+(pfTab==='saved'?'No saved rooms':'No rooms listed')+'</b>'+
        (pfTab==='saved'?'Tap the heart on any room to keep it here.':esc(p.name.split(' ')[0])+' has no rooms listed yet.')+'</div>';
   }
+  function paintPfEmpty(p){
+    const pp=p._pp;if(!pp)return;
+    const em=$('.pf-empty',pp.el);
+    if(pp.done&&!pp.el.querySelector('.post')){
+      if(!em)pp.el.insertAdjacentHTML('beforeend','<div class="pf-empty"><div class="s-emoji">✍️</div><b>No posts yet</b>'+(p.isMe?'Share a tip, a room or a price with the community.<br><button type="button" class="pf-btn" data-pf="compose"><i class="fa-solid fa-pen"></i><span>Write a post</span></button>':esc(p.name.split(' ')[0])+' has not posted anything yet.')+'</div>');
+    }else if(em)em.remove();
+  }
+  function paintPfMore(){
+    const p=curProfile,pp=p&&p._pp,m=$('#pfMore');if(!m)return;
+    m.hidden=!(pfTab==='posts'&&pp&&pp.started&&(!pp.done||pp.busy)&&!p.restricted);
+  }
+  function loadPfPosts(p){
+    const pp=p&&p._pp;
+    if(!pp||pp.busy||pp.done)return Promise.resolve();
+    pp.busy=true;paintPfMore();
+    const cur=pp.next;
+    return rpc('get_user_posts',{p_profile:p.id,p_limit:8,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null}).then(r=>{
+      const fresh=r.posts.filter(x=>!pp.el.querySelector('.post[data-id="'+x.id+'"]'));
+      makePosts(fresh).forEach(a=>{a.style.animationDelay='0s';pp.el.appendChild(a);setupPost(a)});
+      pp.next=r.next||null;pp.done=!r.next;
+      paintPfEmpty(p);renderRailProfile();
+    }).finally(()=>{pp.busy=false;paintPfMore()});
+  }
+  const pfMoreEl=$('#pfMore');
+  const pfRun=infinite(pfMoreEl,pfScroll,()=>{const p=curProfile,pp=p&&p._pp;return curPage==='profile'&&pfTab==='posts'&&!!pp&&pp.started&&!pp.done&&!p.restricted},()=>loadPfPosts(curProfile));
   function paintStats(){
     const p=curProfile;if(!p)return;
     const set=(id,v)=>{const el=$(id);if(el)el.textContent=countTxt(v)};
-    set('#pfStPosts',p.posts);set('#pfStLinks',p.links);set('#pfStLinking',p.linking);
+    set('#pfStPosts',p.posts);set('#pfStLinks',p.links);set('#pfStLinking',p.linking);renderRailProfile();
     const t=$('#pfTabs .tab[data-pt="posts"] .tc');if(t)t.textContent=p.posts;
   }
   // linking / unlinking changes the numbers on the open profile
@@ -1255,6 +1459,42 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     setPage(prevPage==='profile'?'home':prevPage);try{history.pushState(null,'',prevPage==='rooms'?'/rooms':'/')}catch(e){}
   }
 
+  // ---- desktop: the right column of a profile (about, links, photos, rooms, people to link with) ----
+  function renderRailProfile(){
+    const box=$('#rProfile'),p=curProfile;
+    if(!box)return;
+    if(!p||!(isWide()&&curPage==='profile')){return}
+    const first=p.name.split(' ')[0];
+    let h='';
+    // about
+    const facts=[];
+    if(p.area)facts.push('<li><i class="fa-solid fa-location-dot"></i><span>Lives in <b>'+esc(p.area)+'</b></span></li>');
+    facts.push('<li><i class="fa-solid '+(p.role==='Landlord'?'fa-building':'fa-graduation-cap')+'"></i><span>'+esc(p.role)+(p.verified?' · <b class="ok">Verified</b>':'')+'</span></li>');
+    facts.push('<li><i class="fa-regular fa-calendar"></i><span>'+esc(p.joined)+'</span></li>');
+    if(p.private)facts.push('<li><i class="fa-solid fa-lock"></i><span>Private account</span></li>');
+    h+='<section class="r-card r-about"><h3>About '+(p.isMe?'you':esc(first))+'</h3>'+
+      (p.bio?'<p class="ra-bio">'+esc(p.bio)+'</p>':'<p class="ra-bio empty">'+(p.isMe?'Add a bio so people know who you are.':'No bio yet.')+'</p>')+
+      '<ul class="ra-list">'+facts.join('')+'</ul>'+
+      '<div class="ra-stats"><button type="button" data-rp="posts"><b>'+countTxt(p.posts)+'</b><small>Posts</small></button><button type="button" data-rp="links"><b>'+countTxt(p.links)+'</b><small>Links</small></button><button type="button" data-rp="linking"><b>'+countTxt(p.linking)+'</b><small>Linking</small></button></div>'+
+      (p.isMe?'<button type="button" class="ra-edit" data-pf="edit"><i class="fa-solid fa-pen"></i>Edit profile</button>':'')+'</section>';
+    if(!p.restricted){
+      // photos from the posts that have loaded
+      const pp=p._pp,imgs=pp?$$('.photo-grid .tile.main img, .thumb img',pp.el).map(i=>({src:i.getAttribute('src'),id:i.closest('.post').dataset.id})).filter(x=>x.src).slice(0,6):[];
+      if(imgs.length)h+='<section class="r-card r-photos"><h3>Photos</h3><div class="ra-grid">'+imgs.map(x=>'<button type="button" data-rp="post" data-id="'+x.id+'"><img src="'+x.src.replace(/w=\d+&h=\d+/,'w=240&h=240')+'" alt="" onerror="this.remove()"></button>').join('')+'</div></section>';
+      // rooms of a landlord
+      const rooms=roomsOf(p).slice(0,3);
+      if(rooms.length)h+='<section class="r-card"><h3>Rooms by '+esc(first)+'</h3>'+rooms.map(x=>'<div class="sv" data-rp="room" data-id="'+x.id+'"><div class="sv-img"><img src="'+rimg(x.photos[0],120,120)+'" alt="" onerror="this.remove()"></div><div class="sv-t"><b>'+esc(x.title)+'</b><small>'+rfmt(x.price)+' RWF / month · '+esc(x.area)+'</small></div><i class="fa-solid fa-chevron-right"></i></div>').join('')+
+        '<button type="button" class="r-more" data-rp="rooms">See all rooms</button></section>';
+      // links
+      const ppl=(p.linksList||[]).filter(x=>!x.me).slice(0,4);
+      if(ppl.length)h+='<section class="r-card"><h3>Linked with '+(p.isMe?'you':esc(first))+'<span class="cnt">'+countTxt(p.links)+'</span></h3>'+ppl.map(railPerson).join('')+'<button type="button" class="r-more" data-rp="links">See all links</button></section>';
+    }
+    // who else to link with
+    const sug=PEOPLE.filter(x=>x.id!==p.id&&x.id!==ME.id&&!LINKED.has(x.id)).slice(0,3);
+    if(sug.length)h+='<section class="r-card"><h3>Who to link with</h3>'+sug.map(railPerson).join('')+'<button type="button" class="r-more">Show more</button></section>';
+    box.innerHTML=h+'<footer class="r-foot">About · Help · Terms · Privacy<br>© 2026 Ghetto · Live. Learn. Grow...</footer>';
+  }
+
   // ---- events: profile page ----
   function pfClick(e){
     if(e.target.closest('.post'))return feedClick(e);
@@ -1289,7 +1529,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     rpc('delete_post',{p_post:id}).then(()=>{
       if(detail.classList.contains('open')&&curId===id)closePost();
       $$('.post[data-id="'+id+'"]').forEach(x=>x.remove());
-      delete COMMENTS[id];
+      delete COMMENTS[id];LOADED.delete(id);delete PMETA[id];
       if(curProfile&&curProfile.isMe){curProfile.posts=Math.max(0,curProfile.posts-1);paintStats();if(curPage==='profile'&&pfTab==='posts')renderPfList()}
       showToast('Post deleted 🗑️');
     }).catch(()=>fail('Could not delete that post'));
@@ -1407,9 +1647,11 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else setPage(pg);
   });
   if(curPage==='profile'){
+    railReady=true;
     if(INITIAL_PROFILE){rememberPeople(INITIAL_PROFILE);curProfile=INITIAL_PROFILE;renderProfile()}
     else showProfile(ME.handle);
   }
+  railReady=true;updateRail();
 
 
   // =====================================================================
@@ -1425,45 +1667,63 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const linkRow=(act,icon,tone,t,d,val,cls)=>'<button type="button" class="st-row'+(cls?' '+cls:'')+'" data-st="'+act+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b>'+(d?'<small>'+d+'</small>':'')+'</span>'+(val?'<span class="st-val">'+esc(val)+'</span>':'')+'<i class="fa-solid fa-chevron-right st-chev"></i></button>';
   const segRow=(k,icon,tone,t,d,opts)=>'<div class="st-row st-seg-row"><div class="st-head"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span></div><div class="st-seg" data-seg="'+k+'">'+opts.map(o=>'<button type="button" data-val="'+o[0]+'" class="'+(SET[k]===o[0]?'on':'')+'">'+o[1]+'</button>').join('')+'</div></div>';
 
-  function renderSettings(){
-    if(!SET){stBody.innerHTML='<div class="d-empty">Loading settings…</div>';return}
+  // the settings are split into categories. On a phone they are one page; on a desktop the page lists the
+  // categories and the one you pick opens in the right column.
+  const CATS=[
+    ['account','fa-user','y','Account','Profile, email and password'],
+    ['privacy','fa-lock','b','Privacy','Private account, activity and messages'],
+    ['notifications','fa-bell','r','Notifications','Likes, comments, links and rooms'],
+    ['language','fa-globe','g','Language','Choose the app language'],
+    ['help','fa-circle-question','b','Help and about','Support, safety and terms'],
+    ['login','fa-right-from-bracket','r','Log out or delete','Sign out or remove your account']
+  ];
+  let stCat='account';
+  function stSection(k){
     const s=SET;
-    stBody.innerHTML=
-      '<header class="st-top"><button type="button" class="pf-ico" data-st="back" aria-label="Back"><i class="fa-solid fa-arrow-left"></i></button><b>Settings</b></header>'+
-      '<div class="st-wrap">'+
-      '<div class="st-who" data-st="profile" role="button" tabindex="0"><div class="avatar"><img src="'+FACE(s.avatar)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(s.name)+'</b><small>@'+esc(s.handle)+' · '+esc(s.role)+'</small></div><i class="fa-solid fa-chevron-right go"></i></div>'+
-      '<div class="st-h">Your account</div><div class="st-group">'+
+    if(k==='account')return ''+
         linkRow('edit','fa-user-pen','y','Edit profile','Name, username, bio, photo and cover')+
         '<div class="st-row"><span class="st-ic b"><i class="fa-regular fa-envelope"></i></span><span class="st-t"><b>Email</b><small>Used to log in</small></span><span class="st-val">'+esc(s.email||'')+'</span></div>'+
-        linkRow('password','fa-key','g','Change password','Keep your account safe')+
-      '</div>'+
-      '<div class="st-h">Privacy</div><div class="st-group">'+
+        linkRow('password','fa-key','g','Change password','Keep your account safe');
+    if(k==='privacy')return ''+
         swRow('privateAccount','fa-lock','b','Private account','Only people linked with you can see your posts')+
         swRow('showActivity','fa-circle','g','Activity status','Let people see when you are active')+
-        segRow('whoCanMessage','fa-comment-dots','y','Who can message you','Choose who may start a chat with you',WHO)+
-      '</div>'+
-      '<div class="st-h">Notifications</div><div class="st-group">'+
+        segRow('whoCanMessage','fa-comment-dots','y','Who can message you','Choose who may start a chat with you',WHO);
+    if(k==='notifications')return ''+
         swRow('notifyLikes','fa-heart','r','Likes','When someone likes your post')+
         swRow('notifyComments','fa-comment','b','Comments and mentions','Replies, comments and @mentions')+
         swRow('notifyLinks','fa-user-plus','g','New links','When someone links with you')+
-        swRow('notifyRooms','fa-building','y','Room updates','New rooms from landlords you link with')+
+        swRow('notifyRooms','fa-building','y','Room updates','Visit requests and messages about your rooms')+
         swRow('notifyPrices','fa-tags','y','Price updates','Market price changes near you')+
-        swRow('notifyEmail','fa-envelope','b','Email notifications','Also send important updates to your email')+
-      '</div>'+
-      '<div class="st-h">Language</div><div class="st-group">'+
-        segRow('language','fa-globe','g','App language','Translations are coming soon',LANGS)+
-      '</div>'+
-      '<div class="st-h">Help and about</div><div class="st-group">'+
+        swRow('notifyEmail','fa-envelope','b','Email notifications','Also send important updates to your email');
+    if(k==='language')return segRow('language','fa-globe','g','App language','Translations are coming soon',LANGS);
+    if(k==='help')return ''+
         linkRow('help','fa-circle-question','b','Help centre','')+
         linkRow('safety','fa-shield-halved','g','Safety tips','Visit first, never pay before you meet the landlord')+
         linkRow('terms','fa-file-lines','y','Terms and privacy','')+
-        linkRow('about','fa-circle-info','b','About Ghetto','Version 0.1')+
-      '</div>'+
-      '<div class="st-h">Login</div><div class="st-group">'+
+        linkRow('about','fa-circle-info','b','About Ghetto','Version 0.1');
+    return ''+
         linkRow('logout','fa-right-from-bracket','r','Log out','Signed in as '+esc(s.email||'@'+s.handle))+
-        linkRow('delete','fa-trash','r','Delete account','Remove your profile and everything you posted','','danger')+
-      '</div>'+
-      '<div class="st-foot">Ghetto · Live. Learn. Grow...</div></div>';
+        linkRow('delete','fa-trash','r','Delete account','Remove your profile and everything you posted','','danger');
+  }
+  const stTitle=k=>({account:'Your account',privacy:'Privacy',notifications:'Notifications',language:'Language',help:'Help and about',login:'Login'}[k]);
+  function renderSettings(){
+    const rs=$('#rSettings');
+    if(!SET){stBody.innerHTML='<div class="d-empty">Loading settings…</div>';if(rs)rs.innerHTML='';return}
+    const s=SET,wide=isWide();
+    const who='<div class="st-who" data-st="profile" role="button" tabindex="0"><div class="avatar"><img src="'+FACE(s.avatar)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(s.name)+'</b><small>@'+esc(s.handle)+' · '+esc(s.role)+'</small></div><i class="fa-solid fa-chevron-right go"></i></div>';
+    let body;
+    if(wide){
+      body=who+'<div class="st-h">Settings</div><div class="st-group st-cats">'+CATS.map(c=>
+        '<button type="button" class="st-row st-cat'+(c[0]===stCat?' on':'')+(c[0]==='login'?' last-red':'')+'" data-cat="'+c[0]+'"><span class="st-ic '+c[2]+'"><i class="fa-solid '+c[1]+'"></i></span><span class="st-t"><b>'+c[3]+'</b><small>'+c[4]+'</small></span><i class="fa-solid fa-chevron-right st-chev"></i></button>').join('')+'</div>';
+      const c=CATS.find(x=>x[0]===stCat)||CATS[0];
+      if(rs)rs.innerHTML='<div class="st-pane"><div class="st-pane-h"><span class="st-ic '+c[2]+'"><i class="fa-solid '+c[1]+'"></i></span><div><b>'+c[3]+'</b><small>'+c[4]+'</small></div></div><div class="st-group">'+stSection(stCat)+'</div></div>';
+    }else{
+      body=who+CATS.map(c=>'<div class="st-h">'+stTitle(c[0])+'</div><div class="st-group">'+stSection(c[0])+'</div>').join('');
+      if(rs)rs.innerHTML='';
+    }
+    stBody.innerHTML=
+      '<header class="st-top"><button type="button" class="pf-ico" data-st="back" aria-label="Back"><i class="fa-solid fa-arrow-left"></i></button><b>Settings</b></header>'+
+      '<div class="st-wrap">'+body+'<div class="st-foot">Ghetto · Live. Learn. Grow...</div></div>';
   }
   function showSettings(){
     if(curPage!=='settings')prevPage=curPage;
@@ -1482,7 +1742,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const old=SET[k];SET[k]=v;
     return rpc('update_setting',{p_key:SKEY[k],p_value:v}).catch(()=>{SET[k]=old;renderSettings();fail('Could not save that setting')});
   }
-  stBody.addEventListener('click',e=>{
+  function stClick(e){
+    const cat=e.target.closest('[data-cat]');
+    if(cat){stCat=cat.dataset.cat;renderSettings();return}
     const sw=e.target.closest('[data-sw]');
     if(sw){
       const k=sw.dataset.sw,on=!SET[k];
@@ -1511,8 +1773,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(act==='safety')showToast('Visit the room and meet the landlord before you pay 🛡️');
     else if(act==='terms')showToast('Terms and privacy page is coming soon 📄');
     else if(act==='about')showToast('Ghetto 0.1 · Live. Learn. Grow... 🧡');
-  });
-  stBody.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sw],.st-who')){e.preventDefault();e.target.click()}});
+  }
+  stBody.addEventListener('click',stClick);
+  $('#rSettings').addEventListener('click',stClick);
+  const stKey=e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sw],.st-who')){e.preventDefault();e.target.click()}};
+  stBody.addEventListener('keydown',stKey);$('#rSettings').addEventListener('keydown',stKey);
+  if(wideMQ&&wideMQ.addEventListener)wideMQ.addEventListener('change',()=>{if(curPage==='settings')renderSettings();updateRail();renderRailProfile()});
 
   // ---- change password ----
   function openPassword(){$('#pwNew').value='';$('#pwNew2').value='';$('#pwErr').textContent='';openBSheet(pwSheet);setTimeout(()=>$('#pwNew').focus(),350)}

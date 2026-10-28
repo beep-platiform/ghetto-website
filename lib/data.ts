@@ -8,8 +8,17 @@ async function call<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-/** Everything the home + rooms pages need, in one database call (public.get_app_data). */
-export const getAppData = () => call<AppData>('get_app_data');
+/** The first screen of everything (first page of posts, notifications and rooms) in one database call (public.get_app_data). More pages load as the user scrolls. */
+export async function getAppData(): Promise<AppData> {
+  const r = await call<any>('get_app_data');
+  const { feed, notifs, rooms, ...rest } = r;
+  return {
+    ...rest,
+    posts: feed.posts, feedNext: feed.next ?? null, comments: {},
+    notifications: notifs.items, notifNext: notifs.next ?? null, notifUnread: notifs.unread, notifMaxId: notifs.maxId, notifSession: notifs.session,
+    rooms: rooms.rooms, roomsNext: rooms.next ?? null,
+  } as AppData;
+}
 
 /** One profile (no handle = the signed-in user). Returns null when the username does not exist. */
 export const getProfile = (handle?: string) => call<Profile | null>('get_profile', { p_handle: handle ?? null });

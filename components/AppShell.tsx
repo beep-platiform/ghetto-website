@@ -39,6 +39,7 @@ export default function AppShell({ page, data, profile, settings }: { page: 'hom
             <TopBar me={data.me} />
             <Stories stories={data.stories} />
             <Feed posts={data.posts} meId={data.me.id} />
+            <div className={'more' + (data.feedNext ? '' : ' done')} id="feedMore"><span className="more-sp"></span><em className="more-end">You're all caught up ✨</em></div>
           </div>
 
           <RoomsPage />

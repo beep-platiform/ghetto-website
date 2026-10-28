@@ -90,3 +90,12 @@ Notes
 ### Supabase Auth setup
 1. Authentication → URL Configuration: set Site URL (`http://localhost:3000`, later your Vercel URL) and add Redirect URL `<site>/auth/callback`.
 2. For quick development, Authentication → Providers → Email → turn off "Confirm email". Otherwise new users must click the email link first.
+
+## Desktop right column, live notifications & paging
+
+- **Profile** (desktop): the right column shows About (bio, area, role, joined, stats, Edit profile), Photos and "Linked with you" instead of Trending.
+- **Settings** (desktop): categories sit in the middle; the one you pick (Notifications, Privacy, Language…) opens in the right column. On phones it stays one flat list.
+- **Notifications are made by what people do** (database triggers): like, comment, reply, comment like, new link, room visit request, room message. Unliking / unlinking removes them. Your Settings switches decide which kinds you see.
+- **Online**: new ones arrive one by one (polled every 15 s, instantly when the tab is focused) with a toast. **Offline**: likes and comments that came while you were away are combined per post ("Aline, Emerson and 3 others liked your post"); links always stay individual.
+- **Paging**: nothing loads all at once. Feed (8), notifications (10), rooms (6), profile posts (8) load the next page when you scroll near the end, using a cursor (time + id), so nothing repeats or is skipped. Comments load only when a post is opened.
+- Run `0004_notifications_paging.sql` and `0005_notif_photo_get_post.sql` after 0003 (already applied to the `ghetto` project).

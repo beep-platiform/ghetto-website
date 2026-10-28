@@ -4,6 +4,7 @@ export default function ProfilePage() {
     <section className="profile" id="profilePage" aria-label="Profile">
       <div className="pf-scroll" id="pfScroll">
         <div id="pfBody"></div>
+        <div className="more" id="pfMore" hidden><span className="more-sp"></span></div>
       </div>
     </section>
   );

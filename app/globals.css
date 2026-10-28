@@ -1002,3 +1002,59 @@ button.st-row:active{background:#eef1f8}
 @media (min-width:1100px){.s-user-more{display:grid}}
 @media (min-width:760px){.app[data-page="settings"] .st-scroll{padding-bottom:48px}.st-top{height:62px}}
 .pf-handle .fa-lock{font-size:12px;color:#9aa5b8}
+
+/* ===== load more on scroll (feed, notifications, rooms, profile posts) ===== */
+.more{display:flex;justify-content:center;align-items:center;min-height:64px;padding:18px 0 26px;color:var(--muted);font-size:12.5px;font-weight:700}
+.more-sp{width:26px;height:26px;border-radius:50%;border:3px solid #eef1f6;border-top-color:var(--yellow-d);animation:moreSpin .8s linear infinite}
+.more-end{display:none;font-style:normal}
+.more.done .more-sp{display:none}
+.more.done .more-end{display:block}
+.more:not(.busy):not(.done) .more-sp{opacity:.45}
+@keyframes moreSpin{to{transform:rotate(360deg)}}
+.n-item.grouped .n-av{filter:none}
+.bell.ring .dot{animation:dotPop .6s cubic-bezier(.2,.9,.3,1.6)}
+@keyframes dotPop{0%{transform:scale(.4)}60%{transform:scale(1.35)}100%{transform:scale(1)}}
+
+/* ===== DESKTOP: right column for a profile and for settings ===== */
+.r-profile,.r-settings{display:none}
+@media (min-width:1100px){
+  .rail.profile-mode>#rTrend,.rail.profile-mode>#rPeople,.rail.profile-mode>.r-foot,
+  .rail.settings-mode>#rTrend,.rail.settings-mode>#rPeople,.rail.settings-mode>.r-search,.rail.settings-mode>.r-foot{display:none}
+  .rail.profile-mode .r-profile{display:block;animation:rcIn .42s cubic-bezier(.2,.9,.3,1.1)}
+  .rail.settings-mode .r-settings{display:block;animation:rcIn .42s cubic-bezier(.2,.9,.3,1.1)}
+  .rail.settings-mode{padding-top:18px}
+  .rail.profile-mode .r-profile .r-card,.rail.settings-mode .r-settings .st-pane{margin-top:16px}
+  .rail.profile-mode .r-profile>.r-card:first-child{margin-top:12px}
+  .r-profile .r-card h3 .cnt{margin-left:8px;font-size:12px;font-weight:800;background:#fff3c4;color:#8a6100;border-radius:10px;padding:2px 8px;vertical-align:middle}
+  .ra-bio{padding:2px 18px 6px;font-size:14px;line-height:1.55;font-weight:600;color:#33415a;white-space:pre-wrap;word-break:break-word}
+  .ra-bio.empty{color:var(--muted)}
+  .ra-list{list-style:none;padding:4px 18px 6px;display:grid;gap:9px}
+  .ra-list li{display:flex;align-items:center;gap:11px;font-size:13.5px;font-weight:600;color:#44546f}
+  .ra-list li i{width:18px;text-align:center;color:#9aa5b8}
+  .ra-list b{font-weight:800;color:var(--ink)}
+  .ra-list b.ok{color:#1f9d63}
+  .ra-stats{display:grid;grid-template-columns:repeat(3,1fr);margin:8px 12px 4px;padding:10px 0;border-top:1px solid #e8ecf3}
+  .ra-stats button{display:grid;gap:1px;justify-items:center;padding:6px 0;border-radius:14px;transition:.2s}
+  .ra-stats button:hover{background:#eef1f7}
+  .ra-stats b{font-size:17px;font-weight:800;letter-spacing:-.3px}
+  .ra-stats small{font-size:11.5px;color:var(--muted);font-weight:700}
+  .ra-edit{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 28px);height:42px;margin:4px 14px 10px;border-radius:21px;background:#fff;border:1.5px solid #e1e6f0;font-size:13.5px;font-weight:800;transition:.2s}
+  .ra-edit:hover{border-color:var(--yellow);background:#fffdf5}
+  .ra-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:6px 14px 14px}
+  .ra-grid button{aspect-ratio:1;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#ffe6b8,#ffd1a8);transition:.2s}
+  .ra-grid button:hover{transform:scale(1.04)}
+  .ra-grid img{width:100%;height:100%;object-fit:cover;display:block}
+  .r-profile .sv:hover{background:#eef1f7}
+
+  /* settings: the categories sit in the middle, what you pick opens here */
+  .st-cat.on{background:#fff8e1}
+  .st-cat.on .st-chev{color:var(--yellow-d)}
+  .st-cat.on .st-t b{color:var(--ink)}
+  .st-pane{background:#f7f8fb;border:1px solid #eef1f6;border-radius:24px;padding:16px 14px 14px}
+  .st-pane-h{display:flex;align-items:center;gap:13px;padding:2px 6px 14px}
+  .st-pane-h b{display:block;font-size:19px;font-weight:800;letter-spacing:-.3px}
+  .st-pane-h small{display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin-top:2px}
+  .st-pane .st-ic{width:42px;height:42px;border-radius:15px}
+  .st-pane .st-group{margin-bottom:0;box-shadow:none}
+  .st-pane .st-row{padding:13px 14px}
+}
