@@ -2,7 +2,7 @@
 import type { AppData } from '../lib/types';
 import { faceUrl } from '../lib/format';
 
-export default function Sidebar({ page, me }: { page: 'home' | 'rooms' | 'profile' | 'settings'; me: AppData['me'] }) {
+export default function Sidebar({ page, me }: { page: 'home' | 'rooms' | 'profile' | 'settings' | 'create'; me: AppData['me'] }) {
   return (
     <aside className="side" id="side" aria-label="Main navigation">
       <button className="s-brand" id="sBrand" aria-label="Ghetto home">

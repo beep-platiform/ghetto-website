@@ -1,5 +1,26 @@
 import type { Post } from '../lib/types';
-import { photoUrl, faceUrl, metaOf } from '../lib/format';
+import { photoUrl, faceUrl, metaOf, isUrl } from '../lib/format';
+
+/** Extra facts the script needs: the full photo list of uploaded posts, and whether comments are switched off. */
+function extra(p: Post) {
+  const o: Record<string, string> = {};
+  if (p.photos.some(isUrl)) o['data-photos'] = JSON.stringify(p.photos);
+  if (p.commentsOn === false) o['data-cm'] = '0';
+  return o;
+}
+
+/** #topics (and the price on white cards, where there is no photo tag to carry it) */
+function Chips({ p }: { p: Post }) {
+  const price = p.kind === 'compact' && p.sign ? p.sign : '';
+  const tags = p.tags || [];
+  if (!price && !tags.length) return null;
+  return (
+    <div className="post-tags">
+      {price && <span className="pt-price">{price}</span>}
+      {tags.map(t => <span key={t}>#{t}</span>)}
+    </div>
+  );
+}
 
 function Actions({ p }: { p: Post }) {
   const base = p.likes - (p.liked ? 1 : 0);
@@ -37,6 +58,7 @@ function FeaturedPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
       data-id={p.id}
       data-author={p.author.id}
       data-category={p.category ?? undefined}
+      {...extra(p)}
       style={{ animationDelay: `${Math.min(i, 9) * 0.1 + 0.1}s` }}
     >
       <div className="post-head">
@@ -58,9 +80,10 @@ function FeaturedPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
         {p.title} {p.subtitle && <small>{p.subtitle}</small>}
       </div>
       <div className="post-copy">{p.body}</div>
+      <Chips p={p} />
 
       {main && (
-        <div className="photo-grid">
+        <div className={'photo-grid n' + Math.min(p.photos.length, 3)}>
           <div className="tile main">
             <img alt={p.title} src={photoUrl(main, 'w=700&h=500')} />
             {p.sign && <span className="sign">{p.sign}</span>}
@@ -92,6 +115,7 @@ function CompactPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
       data-id={p.id}
       data-author={p.author.id}
       data-category={p.category ?? undefined}
+      {...extra(p)}
       style={{ animationDelay: `${Math.min(i, 9) * 0.1 + 0.1}s` }}
     >
       <div className="compact-row">
@@ -112,6 +136,7 @@ function CompactPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
           </div>
           <div className="compact-title">{p.title}</div>
           <div className="compact-copy">{p.body}</div>
+          <Chips p={p} />
         </div>
         {p.photos[0] && (
           <div className="thumb">

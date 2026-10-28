@@ -14,7 +14,7 @@ import PostDetail from './PostDetail';
 import StoryViewer from './StoryViewer';
 import RightRail from './RightRail';
 import GhettoClient from './GhettoClient';
-import ComposeSheet from './ComposeSheet';
+import CreatePage from './CreatePage';
 import ProfilePage from './ProfilePage';
 import ProfileSheets from './ProfileSheets';
 import SettingsPage from './SettingsPage';
@@ -23,9 +23,9 @@ import type { AppData, Profile, Settings } from '../lib/types';
 
 /**
  * Home, Rooms and Profile share one shell (sidebar, right column, sheets), so switching between them is instant.
- * `page` decides which one is showing first; /  -> home, /rooms -> rooms, /profile[/username] -> profile, /settings -> settings.
+ * `page` decides which one is showing first; /  -> home, /rooms -> rooms, /profile[/username] -> profile, /settings -> settings, /create -> the new-post page.
  */
-export default function AppShell({ page, data, profile, settings }: { page: 'home' | 'rooms' | 'profile' | 'settings'; data: AppData; profile?: Profile | null; settings?: Settings | null }) {
+export default function AppShell({ page, data, profile, settings }: { page: 'home' | 'rooms' | 'profile' | 'settings' | 'create'; data: AppData; profile?: Profile | null; settings?: Settings | null }) {
   return (
     <>
       <div className="shell">
@@ -45,12 +45,12 @@ export default function AppShell({ page, data, profile, settings }: { page: 'hom
           <RoomsPage />
           <ProfilePage />
           <SettingsPage />
+          <CreatePage />
           <FabMenu />
           <BottomNav page={page} />
           <RoomDetail />
           <FilterSheet />
           <ContactSheet />
-          <ComposeSheet />
           <ProfileSheets />
           <SettingsSheets />
           <SearchSheet />

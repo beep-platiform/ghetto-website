@@ -4,6 +4,8 @@ export type Post = {
   id: string; kind: 'featured' | 'compact'; title: string; subtitle: string | null; body: string;
   category: string | null; location: string | null; tag: string | null; photos: string[]; photoTotal: number; moreCount: number;
   sign: string | null; likes: number; shares: number; liked: boolean; ago: string; createdAt: string; author: Author;
+  type?: 'room' | 'tip' | 'price' | 'question' | 'event'; price?: number | null; tags?: string[]; audience?: 'everyone' | 'links';
+  commentsOn?: boolean; alt?: string | null;
   cmtCount: number; top: { name: string; av: string; text: string; likes: number } | null;
 };
 export type AppData = {

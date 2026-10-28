@@ -99,3 +99,14 @@ Notes
 - **Online**: new ones arrive one by one (polled every 15 s, instantly when the tab is focused) with a toast. **Offline**: likes and comments that came while you were away are combined per post ("Aline, Emerson and 3 others liked your post"); links always stay individual.
 - **Paging**: nothing loads all at once. Feed (8), notifications (10), rooms (6), profile posts (8) load the next page when you scroll near the end, using a cursor (time + id), so nothing repeats or is skipped. Comments load only when a post is opened.
 - Run `0004_notifications_paging.sql` and `0005_notif_photo_get_post.sql` after 0003 (already applied to the `ghetto` project).
+
+## Create page (`/create`) and photo uploads
+
+- Open it from **Create** (sidebar) or the **+** button (phone): *New post*, *Add a room* or *Share a price*. The profile "Write a post" button opens it too.
+- A post has a **type** (Room, Tip, Market price, Question, Event), up to **6 photos**, title, details, **price** (Room / Market price), place, up to 5 **topics**, **who can see it** (Everyone or Linked only), **allow comments**, and a description of the photos (for screen readers).
+- A **live preview** shows how it looks in the feed (in the right column on desktop). Text is kept as a **draft** in the browser (`localStorage`); photos stay while the tab is open.
+- **Photos are shrunk in the browser** (`lib/image.ts`): longest side 1280 px, WebP (JPEG on old Safari), quality lowered until about 110 KB, location data removed. A 4 MB phone photo ends up around 25–110 KB and printed text stays readable. They are uploaded only when you press **Post** (parallel, with progress), into the public bucket `post-images` under your own folder (`<your id>/<random>.webp`).
+- Storage rules (`0006_post_create.sql`): bucket limit 300 KB, only `image/webp` and `image/jpeg`, you can upload and delete only inside your own folder, and `create_post()` accepts only photo links from your own folder (max 6).
+- Run `0006_post_create.sql` and `0007_post_layout.sql` after 0005 (already applied to the `ghetto` project). A post with 2+ photos (or a room with a photo) uses the big card, otherwise the compact row.
+- "Linked only" posts are hidden from everyone who does not link with the author, and comments can be switched off per post (enforced in the database).
+- Note: photo files are public by link (like most social apps), but the links are random and cannot be listed.

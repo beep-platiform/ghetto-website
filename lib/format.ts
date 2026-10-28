@@ -1,7 +1,9 @@
 import type { Post } from './types';
 
 export const IMG_BASE = 'https://images.unsplash.com/';
-export const photoUrl = (id: string, size: string) => `${IMG_BASE}${id}?${size}&fit=crop`;
+/** A photo is either an Unsplash id (sample data) or a full link to a photo someone uploaded. */
+export const isUrl = (s: string) => /^(https?|blob):/.test(s);
+export const photoUrl = (id: string, size: string) => (isUrl(id) ? id : `${IMG_BASE}${id}?${size}&fit=crop`);
 export const faceUrl = (id: string) => `${IMG_BASE}${id}?w=100&h=100&fit=crop&crop=faces`;
 
 /** "Student · 2h ago · Nyabugogo" (the place is only shown on the big orange cards). */

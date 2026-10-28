@@ -6,7 +6,8 @@
  * All content comes from Supabase (DATA = public.get_app_data()); every change is saved back through RPC calls (lib/supabase.ts).
  */
 import { RFAC, RTYPES, RTYPE, ICON, POOL } from './constants';
-import { rpc, supabase, signOut } from './supabase';
+import { rpc, supabase, signOut, uploadPostImage, removePostImages } from './supabase';
+import { compressImage, prettySize } from './image';
 import { metaOf } from './format';
 
 export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
@@ -148,7 +149,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   });
   $$('button',menu).forEach(b=>b.addEventListener('click',()=>{
     fab.classList.remove('open');menu.classList.remove('show');
-    if(b.dataset.act==='compose'){openCompose();return}
+    if(b.dataset.act==='create'){openCreate(b.dataset.type);return}
     showToast(b.dataset.msg);
   }));
   document.addEventListener('click',e=>{if(!e.target.closest('#fab')&&!e.target.closest('#fabMenu')&&!e.target.closest('#sideCreate')){fab.classList.remove('open');menu.classList.remove('show')}});
@@ -226,6 +227,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   // ===== POST DETAIL + COMMENTS =====
   const FACE=id=>'https://images.unsplash.com/'+id+'?w=100&h=100&fit=crop&crop=faces';
+  const isU=s=>/^(https?|blob):/.test(s);
   const ago=t=>t<1?'Just now':t<60?t+'m':t<1440?Math.floor(t/60)+'h':Math.floor(t/1440)+'d';
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const totalOf=id=>COMMENTS[id].reduce((s,c)=>s+1+c.replies.length,0);
@@ -278,8 +280,10 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const imgs=$$('.photo-grid img, .thumb img',art).map(i=>i.getAttribute('src'));
     const cnt=$('.photo-count',art);
     const total=cnt?(parseInt(cnt.textContent.split('/')[1],10)||imgs.length):imgs.length;
-    const photos=imgs.slice();
-    for(let k=0;photos.length<total&&k<POOL.length;k++){
+    let photos=imgs.slice(),own=null;
+    try{own=art.dataset.photos?JSON.parse(art.dataset.photos):null}catch(e){}
+    if(own&&own.length)photos=own.slice();
+    else for(let k=0;photos.length<total&&k<POOL.length;k++){
       const u='https://images.unsplash.com/'+POOL[k]+'?w=900&h=700&fit=crop';
       if(!photos.some(x=>x.indexOf(POOL[k])>-1))photos.push(u);
     }
@@ -395,6 +399,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const pid=curId;
     if(!LOADED.has(pid))COMMENTS[pid]=[];
     buildPost(art);
+    const cmOff=art.dataset.cm==='0';
+    dInput.disabled=cmOff;if(cmOff){dInput.placeholder='Comments are turned off for this post'}
     if(LOADED.has(pid)){computeOrder();renderList()}
     else{
       order=[];
@@ -901,12 +907,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // =====================================================================
   // ROOMS
   // =====================================================================
-  const appEl=$('.app'),roomDetail=$('#roomDetail'),filterSheet=$('#filterSheet'),contactSheet=$('#contactSheet'),composeSheet=$('#composeSheet');
+  const appEl=$('.app'),roomDetail=$('#roomDetail'),filterSheet=$('#filterSheet'),contactSheet=$('#contactSheet');
   let curPage=(document.querySelector('.app')||{dataset:{}}).dataset.page||'home',curRoom=null;
   const rfmt=n=>n.toLocaleString('en-US');
   const rk=n=>n>=1000?(n/1000)+'k':String(n);
   const dlabel=iso=>new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
-  const rimg=(id,w,h)=>'https://images.unsplash.com/'+id+'?w='+w+'&h='+h+'&fit=crop';
+  const rimg=(id,w,h)=>isU(id)?id:'https://images.unsplash.com/'+id+'?w='+w+'&h='+h+'&fit=crop';
   const availTxt=r=>r.from<=TODAY?'Available now':'From '+dlabel(r.from);
   const F={q:'',type:'all',min:0,max:300000,fac:new Set(),ver:false,date:'',sort:'rec',savedOnly:false};
   const saved=new Set(ROOMS.filter(r=>r.saved).map(r=>r.id));
@@ -1067,6 +1073,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     rail.classList.toggle('rooms-mode',rooms);
     rail.classList.toggle('profile-mode',wide&&!comments&&!room&&curPage==='profile');
     rail.classList.toggle('settings-mode',wide&&!comments&&!room&&curPage==='settings');
+    rail.classList.toggle('create-mode',wide&&!comments&&!room&&curPage==='create');
+    placePreview();
     if(railReady&&wide&&curPage==='profile')renderRailProfile();
     const host=(wide&&curPage==='rooms')?$('#rfHost'):$('#fsBody'),fp=$('#filterPanel');
     if(fp.parentNode!==host)host.appendChild(fp);
@@ -1076,7 +1084,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function closeBSheet(s){s.classList.remove('open');s.setAttribute('aria-hidden','true')}
   function setPage(pg){
     curPage=pg;appEl.dataset.page=pg;
-    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);closeBSheet(composeSheet);closeBSheet(editSheet);closeBSheet(linksSheet);closeBSheet(pwSheet);closeBSheet(logoutSheet);closeBSheet(deleteSheet);
+    closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);closeBSheet(editSheet);closeBSheet(linksSheet);closeBSheet(pwSheet);closeBSheet(logoutSheet);closeBSheet(deleteSheet);
     if(detail.classList.contains('open'))closePost();
     if(roomDetail.classList.contains('open'))closeRoom();
     $$('.nav-item').forEach(n=>n.classList.toggle('active',n.textContent.trim().toLowerCase()===pg));
@@ -1187,7 +1195,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(e.target.closest('#fpApply')){closeBSheet(filterSheet);$('#rmScroll').scrollTo({top:0,behavior:'smooth'})}
   });
   $('#fpDate').addEventListener('change',e=>{F.date=e.target.value;renderRooms(false)});
-  [filterSheet,contactSheet,composeSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
+  [filterSheet,contactSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
 
   // ---- events: room detail + right column ----
   $('#rdBack').addEventListener('click',closeRoom);
@@ -1233,39 +1241,34 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#csWa').addEventListener('click',()=>showToast('Opening WhatsApp 💬'));
   document.addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
-    if(composeSheet.classList.contains('open')){closeBSheet(composeSheet);return}
     if(contactSheet.classList.contains('open')){closeBSheet(contactSheet);return}
     if(filterSheet.classList.contains('open')){closeBSheet(filterSheet);return}
     if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))closeRoom();
   });
 
-  // ---- new post ----
-  function openCompose(){
-    $('#cpAv').src=FACE(USER);
-    ['#cpTitle','#cpBody','#cpLoc'].forEach(k=>{$(k).value=''});
-    openBSheet(composeSheet);
-    setTimeout(()=>$('#cpTitle').focus(),350);
-  }
+  // ---- new post: see CREATE A POST below ----
   function postHTML(p){
     const a=p.author,self=a.id===ME.id?' self':'',link=a.linked?'<button class="follow on'+self+'">'+CHK+'Linked</button>':'<button class="follow'+self+'">Link</button>';
     const acts='<div class="post-actions"><button class="action like'+(p.liked?' on':'')+'" data-count="'+(p.likes-(p.liked?1:0))+'"><i class="'+(p.liked?'fa-solid':'fa-regular')+' fa-heart"></i><span>'+p.likes+'</span></button>'+
       '<button class="action cmt"><i class="fa-regular fa-comment"></i><span>0</span></button><button class="action share"><i class="fa-solid fa-share"></i><span>'+p.shares+'</span></button></div>';
-    const attrs=' data-id="'+p.id+'" data-author="'+a.id+'"'+(p.category?' data-category="'+esc(p.category)+'"':'')+' style="animation-delay:0s"';
-    const img=(id,size)=>'https://images.unsplash.com/'+id+'?'+size+'&fit=crop';
+    const attrs=' data-id="'+p.id+'" data-author="'+a.id+'"'+(p.category?' data-category="'+esc(p.category)+'"':'')+
+      (p.photos.some(isU)?' data-photos="'+esc(JSON.stringify(p.photos))+'"':'')+(p.commentsOn===false?' data-cm="0"':'')+' style="animation-delay:0s"';
+    const chips=(p.kind==='compact'&&p.sign||(p.tags&&p.tags.length))?'<div class="post-tags">'+(p.kind==='compact'&&p.sign?'<span class="pt-price">'+esc(p.sign)+'</span>':'')+(p.tags||[]).map(t=>'<span>#'+esc(t)+'</span>').join('')+'</div>':'';
+    const img=(id,size)=>isU(id)?id:'https://images.unsplash.com/'+id+'?'+size+'&fit=crop';
     if(p.kind==='featured'){
       let grid='';
       if(p.photos.length){
-        grid='<div class="photo-grid"><div class="tile main"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=700&h=500')+'">'+(p.sign?'<span class="sign">'+esc(p.sign)+'</span>':'')+'<span class="photo-count">1/'+(p.photoTotal||p.photos.length)+'</span></div>'+
+        grid='<div class="photo-grid n'+Math.min(p.photos.length,3)+'"><div class="tile main"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=700&h=500')+'">'+(p.sign?'<span class="sign">'+esc(p.sign)+'</span>':'')+'<span class="photo-count">1/'+(p.photoTotal||p.photos.length)+'</span></div>'+
           (p.photos[1]?'<div class="tile t2"><img alt="" src="'+img(p.photos[1],'w=350&h=250')+'"></div>':'')+
           (p.photos[2]?'<div class="tile t3"><img alt="" src="'+img(p.photos[2],'w=350&h=250')+'">'+(p.moreCount>0?'<div class="more-mask">+'+p.moreCount+'</div>':'')+'</div>':'')+'</div>';
       }
       return '<article class="post featured"'+attrs+'><div class="post-head"><div class="avatar"><img alt="'+esc(a.name)+'" src="'+FACE(a.avatar)+'"></div><div><div class="author">'+esc(a.name)+' '+(a.verified?'<i class="fa-solid fa-circle-check"></i>':'')+'</div>'+
         '<div class="meta">'+esc(metaOf(p))+'</div></div>'+link+'<button class="more" aria-label="More"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>'+
-        '<div class="post-title">'+esc(p.title)+(p.subtitle?' <small>'+esc(p.subtitle)+'</small>':'')+'</div><div class="post-copy">'+esc(p.body)+'</div>'+grid+acts+'</article>';
+        '<div class="post-title">'+esc(p.title)+(p.subtitle?' <small>'+esc(p.subtitle)+'</small>':'')+'</div><div class="post-copy">'+esc(p.body)+'</div>'+chips+grid+acts+'</article>';
     }
     return '<article class="post compact"'+attrs+'><div class="compact-row"><div class="compact-body"><div class="head"><div class="avatar"><img alt="'+esc(a.name)+'" src="'+FACE(a.avatar)+'"></div>'+
       '<div><div class="author">'+esc(a.name)+' <em>('+esc(a.role)+')</em></div><div class="meta">'+esc(metaOf(p))+(p.tag==='New'?' <span class="tag">New</span>':'')+'</div></div>'+link+'</div>'+
-      '<div class="compact-title">'+esc(p.title)+'</div><div class="compact-copy">'+esc(p.body)+'</div></div>'+
+      '<div class="compact-title">'+esc(p.title)+'</div><div class="compact-copy">'+esc(p.body)+'</div>'+chips+'</div>'+
       (p.photos[0]?'<div class="thumb"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=240&h=280')+'"></div>':'')+'</div>'+acts+'</article>';
   }
   // posts from the database -> elements (remembers the people + the comment preview, which setupPost draws)
@@ -1294,21 +1297,6 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   paintFeedMore();
   feedRun=infinite(feedMore,$('#scroll'),()=>!!FEEDNEXT&&curPage==='home',loadFeed);
 
-  $('#cpSend').addEventListener('click',()=>{
-    const t=$('#cpTitle').value.trim(),b=$('#cpBody').value.trim(),l=$('#cpLoc').value.trim(),btn=$('#cpSend');
-    if(!t||!b){showToast('Add a title and some text ✍️');return}
-    btn.disabled=true;
-    rpc('create_post',{p_title:t,p_body:b,p_location:l||null}).then(p=>{
-      const art=makePosts([p])[0];$('#feed').prepend(art);setupPost(art);
-      const pp=curProfile&&curProfile.isMe&&curProfile._pp;
-      if(pp){const a2=makePosts([p])[0];const em=$('.pf-empty',pp.el);if(em)em.remove();pp.el.prepend(a2);setupPost(a2)}
-      closeBSheet(composeSheet);
-      if(curPage!=='home'){setPage('home');try{history.pushState(null,'','/')}catch(e){}}
-      $('#scroll').scrollTo({top:0,behavior:'smooth'});
-      if(curProfile&&curProfile.isMe){curProfile.posts++;paintStats()}
-      showToast('Posted 🎉');
-    }).catch(()=>fail('Could not post. Try again')).finally(()=>{btn.disabled=false});
-  });
 
   roomsRun=infinite($('#rmMore'),$('#rmScroll'),()=>!!ROOMSNEXT&&curPage==='rooms',loadRooms);
   renderRooms(false);updateRail();
@@ -1507,7 +1495,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const act=a.dataset.pf;
     if(act==='back')backFromProfile();
     else if(act==='edit')openEdit();
-    else if(act==='compose')openCompose();
+    else if(act==='compose')openCreate();
     else if(act==='settings')openSettings();
     else if(act==='message')showToast('Messages are coming soon 💬');
     else if(act==='share'){
@@ -1636,12 +1624,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   })});
 
   // browser back / forward and deep links
-  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':'home';
+  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':location.pathname.indexOf('/create')===0?'create':'home';
   window.addEventListener('popstate',()=>{
     const pg=pagePath();
     if(navDepth>0)navDepth--;
     if(pg==='profile'){const seg=location.pathname.split('/')[2];showProfile(seg?decodeURIComponent(seg):ME.handle)}
     else if(pg==='settings')showSettings();
+    else if(pg==='create')showCreate();
     else setPage(pg);
   });
   if(curPage==='profile'){
@@ -1651,6 +1640,273 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   railReady=true;updateRail();
 
+
+  // =====================================================================
+  // CREATE A POST  (/create)
+  // Photos are shrunk in the browser (lib/image.ts) and only uploaded to storage when you press Post,
+  // so an abandoned draft never leaves files behind. Text is kept as a draft in this browser.
+  // =====================================================================
+  const CR_TYPES=[
+    {id:'room',label:'Room',icon:'fa-bed',tph:'e.g. Single room with own bathroom',bph:'What is included, the rules, the deposit and how to visit.',price:'Monthly rent',phint:'Shown on the photo',need:true},
+    {id:'tip',label:'Tip',icon:'fa-lightbulb',tph:'e.g. How I save on transport to campus',bph:'Share what worked for you, step by step.'},
+    {id:'price',label:'Market price',icon:'fa-tag',tph:'e.g. Rice 1 kg at Nyabugogo market',bph:'Where did you see it? Is it cheap, normal or expensive?',price:'Price you saw',phint:'Helps others compare',need:true},
+    {id:'question',label:'Question',icon:'fa-circle-question',tph:'e.g. Where can I find a quiet place to study?',bph:'Add a little detail so people can answer well.'},
+    {id:'event',label:'Event',icon:'fa-calendar-days',tph:'e.g. Study group at Kimironko library',bph:'When, where, and who should come?'}
+  ];
+  const CR_TAGS={room:['singleroom','sharedroom','deposit','wifi','nearcampus'],tip:['studytips','budget','transport','food','wifi'],price:['food','transport','market','rent','cheap'],question:['help','rooms','study','safety','transport'],event:['campus','study','meetup','free','weekend']};
+  const CR_AUD={everyone:['fa-earth-africa','Everyone','Everyone on Ghetto'],links:['fa-user-group','Linked','Only people you link with']};
+  const CR_MAX=6,CRK='ghetto.draft.'+ME.id;
+  const crNew=()=>({type:'tip',title:'',body:'',price:'',loc:'',tags:[],aud:'everyone',cm:true,alt:'',photos:[]});
+  let CR=crNew(),crPosting=false,crTileN=0,crSavedTimer=0,crPrevTimer=0,crDraftTimer=0,crReady=false;
+  const crType=()=>CR_TYPES.find(t=>t.id===CR.type)||CR_TYPES[1];
+  const crHasText=()=>!!(CR.title.trim()||CR.body.trim()||CR.price||CR.loc.trim()||CR.tags.length||CR.alt.trim());
+  const crFmt=n=>(+n).toLocaleString('en-US');
+
+  function crSaveDraft(){
+    clearTimeout(crDraftTimer);
+    crDraftTimer=setTimeout(()=>{
+      try{
+        if(!crHasText()){localStorage.removeItem(CRK);return}
+        localStorage.setItem(CRK,JSON.stringify({type:CR.type,title:CR.title,body:CR.body,price:CR.price,loc:CR.loc,tags:CR.tags,aud:CR.aud,cm:CR.cm,alt:CR.alt}));
+        const s=$('#crSaved');if(s){s.textContent='Draft saved';s.classList.add('show');clearTimeout(crSavedTimer);crSavedTimer=setTimeout(()=>s.classList.remove('show'),1600)}
+      }catch(e){}
+    },700);
+  }
+  function crLoadDraft(){
+    try{
+      const d=JSON.parse(localStorage.getItem(CRK)||'null');
+      if(!d||typeof d!=='object')return null;
+      return {type:CR_TYPES.some(t=>t.id===d.type)?d.type:'tip',title:String(d.title||'').slice(0,140),body:String(d.body||'').slice(0,2000),price:String(d.price||'').replace(/\D/g,'').slice(0,9),
+        loc:String(d.loc||'').slice(0,60),tags:Array.isArray(d.tags)?d.tags.map(String).slice(0,5):[],aud:d.aud==='links'?'links':'everyone',cm:d.cm!==false,alt:String(d.alt||'').slice(0,200)};
+    }catch(e){return null}
+  }
+  function crClearDraft(){clearTimeout(crDraftTimer);try{localStorage.removeItem(CRK)}catch(e){}}
+
+  // ---- painting ----
+  function crPaintTypes(){
+    $('#crTypes').innerHTML=CR_TYPES.map(t=>'<button type="button" role="radio" class="cr-type'+(CR.type===t.id?' on':'')+'" data-type="'+t.id+'" aria-checked="'+(CR.type===t.id)+'"><i class="fa-solid '+t.icon+'"></i>'+t.label+'</button>').join('');
+    const t=crType();
+    $('#crTitle').placeholder=t.tph;$('#crBody').placeholder=t.bph;
+    $('#crPriceBox').hidden=!t.price;
+    if(t.price){$('label[for=crPrice]').textContent=t.price;$('#crPriceHint').textContent=t.phint}
+  }
+  function crPaintPhotos(){
+    const box=$('#crPhotos'),list=CR.photos;
+    if(!list.length){
+      box.innerHTML='<button type="button" class="cr-drop" data-cr="pick"><i class="fa-solid fa-camera"></i><b>Add photos</b><small>Tap to choose, or drop them here</small></button>';
+    }else{
+      box.innerHTML=list.map((t,i)=>'<div class="cr-ph'+(t.state==='busy'?' busy':'')+'" data-tid="'+t.id+'">'+
+        (t.url?'<img alt="" src="'+t.url+'">':'')+(t.state==='busy'?'<span class="cr-spin"></span>':'')+
+        (i===0?'<span class="cr-cover">Cover</span>':(t.state==='ready'?'<button type="button" class="cr-mk" data-ph="cover" aria-label="Make this the cover photo"><i class="fa-solid fa-star"></i></button>':''))+
+        '<button type="button" class="cr-rm" data-ph="rm" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button>'+
+        (t.state==='ready'?'<span class="cr-sz">'+prettySize(t.after)+'</span>':'')+'</div>').join('')+
+        (list.length<CR_MAX?'<button type="button" class="cr-add" data-cr="pick" aria-label="Add more photos"><i class="fa-solid fa-plus"></i></button>':'');
+    }
+    const ready=list.filter(t=>t.state==='ready'),before=ready.reduce((s,t)=>s+t.before,0),after=ready.reduce((s,t)=>s+t.after,0);
+    $('#crPhInfo').textContent=list.length?list.length+'/'+CR_MAX:'Up to '+CR_MAX;
+    $('#crSaving').innerHTML=ready.length&&before>after*1.5?'<i class="fa-solid fa-leaf"></i> Shrunk from <b>'+prettySize(before)+'</b> to <b>'+prettySize(after)+'</b>. Text in the photos stays readable.':'Photos are shrunk on your phone before upload, so they load fast and cost no extra data.';
+    $('#crAltBox').hidden=!list.length;
+  }
+  function crPaintTags(){
+    $('#crTags').innerHTML=CR.tags.map(t=>'<span class="cr-tag">#'+esc(t)+'<button type="button" data-tagx="'+esc(t)+'" aria-label="Remove topic '+esc(t)+'"><i class="fa-solid fa-xmark"></i></button></span>').join('');
+    $('#crTagN').textContent=CR.tags.length+'/5';
+    $('#crTagChips').innerHTML=CR.tags.length>=5?'':(CR_TAGS[CR.type]||[]).filter(t=>CR.tags.indexOf(t)<0).map(t=>'<button type="button" class="cr-chip" data-tag="'+t+'">#'+t+'</button>').join('');
+  }
+  function crPaintLoc(){
+    const base=[ME.area,'Nyabugogo','Kimironko','Remera','Kicukiro','Gikondo','Kacyiru','Nyamirambo'].filter(Boolean),seen={};
+    $('#crLocChips').innerHTML=base.filter(a=>seen[a]?false:(seen[a]=1)).slice(0,6).map(a=>'<button type="button" class="cr-chip'+(CR.loc===a?' on':'')+'" data-loc="'+esc(a)+'">'+esc(a)+'</button>').join('');
+  }
+  function crPaintAud(){
+    const a=CR_AUD[CR.aud];
+    $('#crAudPill').innerHTML='<i class="fa-solid '+a[0]+'"></i><span>'+a[1]+'</span><i class="fa-solid fa-chevron-down"></i>';
+    $('#crAudHint').textContent=a[2];
+    $$('#crAud button').forEach(b=>{const on=b.dataset.v===CR.aud;b.classList.toggle('on',on);b.setAttribute('aria-checked',String(on))});
+    const sw=$('#crCm');sw.classList.toggle('on',CR.cm);sw.setAttribute('aria-checked',String(CR.cm));
+  }
+  function crPaintCounts(){$('#crTitleN').textContent=CR.title.length+'/140';$('#crBodyN').textContent=CR.body.length+'/2000'}
+  function crPaintFields(){
+    $('#crTitle').value=CR.title;$('#crBody').value=CR.body;$('#crPrice').value=CR.price?crFmt(CR.price):'';$('#crLoc').value=CR.loc;$('#crAlt').value=CR.alt;
+    crPaintCounts();
+  }
+  function crPreview(){
+    clearTimeout(crPrevTimer);
+    crPrevTimer=setTimeout(()=>{
+      const host=$('#crPrev');if(!host)return;
+      const photos=CR.photos.filter(t=>t.url).map(t=>t.url),t=crType(),priced=!!t.price&&+CR.price>0;
+      const p={id:'preview',kind:(photos.length>=2||(CR.type==='room'&&photos.length>=1))?'featured':'compact',
+        title:CR.title.trim()||'Your title shows here',subtitle:null,body:CR.body.trim()||'Your details show here. Say what, where and how much.',
+        category:'',location:CR.loc.trim()||null,tag:CR.type==='room'?'New':null,photos,photoTotal:photos.length,moreCount:Math.max(photos.length-3,0),
+        sign:priced?crFmt(CR.price)+' RWF':null,tags:CR.tags,commentsOn:CR.cm,likes:0,shares:0,liked:false,ago:'Just now',cmtCount:0,
+        author:{id:ME.id,name:ME.name,role:ME.role,avatar:ME.avatar,verified:false,linked:false}};
+      host.innerHTML=postHTML(p);
+    },90);
+  }
+  function crMissing(){
+    const t=crType();
+    if(!CR.title.trim())return ['crTitle','Add a title ✍️'];
+    if(!CR.body.trim())return ['crBody','Write a few details'];
+    if(t.need&&!(+CR.price>0))return ['crPrice','Add the price 💰'];
+    return null;
+  }
+  function crBusyUI(on,text){
+    ['#crPost','#crPost2'].forEach((s,i)=>{
+      const b=$(s);if(!b)return;
+      b.disabled=on;b.classList.toggle('busy',on);
+      b.innerHTML=on?(i?'<span class="cr-spin sm"></span>'+text:text):(i?'<i class="fa-solid fa-paper-plane"></i>Post':'Post');
+    });
+  }
+  function crPaintAll(){crPaintTypes();crPaintPhotos();crPaintTags();crPaintLoc();crPaintAud();crPaintFields();crPreview();crBusyUI(crPosting,'Posting…')}
+  function crChanged(){crPaintCounts();crPreview();crSaveDraft()}
+  function crShake(id){const el=$('#'+id);if(!el)return;const box=el.closest('.cr-field')||el;box.classList.remove('cr-bad');void box.offsetWidth;box.classList.add('cr-bad');el.focus({preventScroll:false});setTimeout(()=>box.classList.remove('cr-bad'),900)}
+
+  // ---- photos ----
+  async function crAddFiles(files){
+    files=[...files].filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name));
+    if(!files.length){showToast('Choose photos 📷');return}
+    const room=CR_MAX-CR.photos.length;
+    if(room<=0){showToast('Up to '+CR_MAX+' photos');return}
+    if(files.length>room){showToast('Up to '+CR_MAX+' photos. Added '+room);files=files.slice(0,room)}
+    const tiles=files.map(f=>({id:++crTileN,state:'busy',url:'',blob:null,ext:'',before:f.size,after:0,remote:''}));
+    CR.photos.push(...tiles);crPaintPhotos();
+    let next=0,firstErr='';
+    const worker=async()=>{ // two at a time keeps phones from running out of memory
+      while(next<files.length){
+        const k=next++,t=tiles[k];
+        try{
+          const r=await compressImage(files[k]);
+          if(CR.photos.indexOf(t)<0)continue; // removed while it was being shrunk
+          t.blob=r.blob;t.ext=r.ext;t.after=r.after;t.url=URL.createObjectURL(r.blob);t.state='ready';
+        }catch(e){t.state='err';if(!firstErr)firstErr=e.message||'This photo could not be used'}
+        crPaintPhotos();crPreview();
+      }
+    };
+    await Promise.all([worker(),worker()]);
+    if(tiles.some(t=>t.state==='err')){CR.photos=CR.photos.filter(t=>t.state!=='err');crPaintPhotos();crPreview();fail(firstErr)}
+  }
+  function crDropPhoto(t,keepRemote){
+    if(t.url){try{URL.revokeObjectURL(t.url)}catch(e){}}
+    if(t.remote&&!keepRemote)removePostImages([t.remote]);
+  }
+
+  // ---- open / close ----
+  function showCreate(type){
+    if(curPage!=='create')prevPage=curPage;
+    setPage('create');
+    $('#crScroll').scrollTop=0;
+    $('#crAv').src=FACE(ME.avatar);$('#crName').textContent=ME.name;
+    $('#crDraft').hidden=true;
+    if(!crHasText()&&!CR.photos.length){
+      const d=crLoadDraft();
+      if(d&&(d.title.trim()||d.body.trim()||d.loc.trim()||d.tags.length||d.alt.trim()||d.price)){Object.assign(CR,d);$('#crDraft').hidden=false}
+    }
+    if(type&&CR_TYPES.some(t=>t.id===type)&&!crHasText())CR.type=type;
+    crPaintAll();crReady=true;updateRail();
+    if(!isWide()&&!CR.title)setTimeout(()=>{if(curPage==='create'&&!/input|textarea/i.test((document.activeElement||{}).tagName||''))$('#crTitle').focus({preventScroll:true})},350);
+  }
+  function openCreate(type){try{history.pushState(null,'','/create');navDepth++}catch(e){}showCreate(type)}
+  function backFromCreate(){
+    if(navDepth>0){history.back();return}
+    const to=prevPage==='create'?'home':prevPage;
+    setPage(to);try{history.pushState(null,'',to==='rooms'?'/rooms':to==='profile'&&curProfile?profPath(curProfile.handle):'/')}catch(e){}
+  }
+  function crReset(removeFiles){
+    CR.photos.forEach(t=>crDropPhoto(t,!removeFiles));
+    CR=crNew();crClearDraft();
+  }
+
+  // ---- post ----
+  async function crPost(){
+    if(crPosting)return;
+    const bad=crMissing();
+    if(bad){showToast(bad[1]);crShake(bad[0]);return}
+    if(CR.photos.some(t=>t.state==='busy')){showToast('Still shrinking your photos…');return}
+    crPosting=true;crBusyUI(true,CR.photos.length?'Uploading…':'Posting…');
+    try{
+      const todo=CR.photos.filter(t=>!t.remote),total=CR.photos.length;let q=0,done=total-todo.length;
+      const run=async()=>{while(q<todo.length){const t=todo[q++];t.remote=await uploadPostImage(t.blob,t.ext);done++;crBusyUI(true,'Uploading '+done+'/'+total)}};
+      await Promise.all(Array.from({length:Math.min(3,todo.length)},run));
+      crBusyUI(true,'Posting…');
+      const t=crType();
+      const p=await rpc('create_post',{p_title:CR.title.trim(),p_body:CR.body.trim(),p_location:CR.loc.trim()||null,p_type:CR.type,p_photos:CR.photos.map(x=>x.remote),
+        p_price:t.price&&+CR.price>0?+CR.price:null,p_tags:CR.tags,p_audience:CR.aud,p_comments:CR.cm,p_alt:CR.photos.length&&CR.alt.trim()?CR.alt.trim():null});
+      crAfterPost(p);
+    }catch(e){
+      const m=String((e&&e.message)||'');
+      fail(/row-level|mime|size|bucket|Invalid photo|storage|Payload/i.test(m)?'A photo could not be uploaded':(m&&m.length<70?m:'Could not post. Try again'));
+    }finally{crPosting=false;crBusyUI(false)}
+  }
+  function crAfterPost(p){
+    const art=makePosts([p])[0];$('#feed').prepend(art);setupPost(art);
+    const pp=curProfile&&curProfile.isMe&&curProfile._pp;
+    if(pp){const a2=makePosts([p])[0];const em=$('.pf-empty',pp.el);if(em)em.remove();pp.el.prepend(a2);setupPost(a2)}
+    if(curProfile&&curProfile.isMe){curProfile.posts++;paintStats()}
+    CR.photos.forEach(t=>crDropPhoto(t,true));CR=crNew();crClearDraft();crPaintAll();
+    setPage('home');try{history.replaceState(null,'','/');if(navDepth>0)navDepth--}catch(e){}
+    $('#scroll').scrollTo({top:0,behavior:'smooth'});
+    showToast('Posted 🎉');
+  }
+
+  // ---- tags ----
+  function crAddTag(raw){
+    const x=String(raw||'').toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,24);
+    if(x.length<2){if(raw&&String(raw).trim())showToast('Topics need 2+ letters or numbers');return false}
+    if(CR.tags.indexOf(x)>-1||CR.tags.length>=5)return false;
+    CR.tags.push(x);crPaintTags();crChanged();return true;
+  }
+
+  // ---- events ----
+  const crRoot=$('#createPage');
+  crRoot.addEventListener('input',e=>{
+    const id=e.target.id;
+    if(id==='crTitle')CR.title=e.target.value;
+    else if(id==='crBody')CR.body=e.target.value;
+    else if(id==='crPrice'){const d=e.target.value.replace(/\D/g,'').slice(0,9);CR.price=d;e.target.value=d?crFmt(d):''}
+    else if(id==='crLoc'){CR.loc=e.target.value;$$('#crLocChips .cr-chip').forEach(c=>c.classList.toggle('on',c.dataset.loc===CR.loc))}
+    else if(id==='crAlt')CR.alt=e.target.value;
+    else return;
+    crChanged();
+  });
+  crRoot.addEventListener('keydown',e=>{
+    if(e.target.id!=='crTagIn')return;
+    if(e.key==='Enter'||e.key===','||e.key===' '){e.preventDefault();if(crAddTag(e.target.value))e.target.value='';else if(e.key==='Enter'&&!e.target.value.trim())e.target.blur()}
+    else if(e.key==='Backspace'&&!e.target.value&&CR.tags.length){CR.tags.pop();crPaintTags();crChanged()}
+  });
+  crRoot.addEventListener('focusout',e=>{if(e.target.id==='crTagIn'&&e.target.value.trim()){if(crAddTag(e.target.value))e.target.value=''}});
+  crRoot.addEventListener('click',e=>{
+    const ty=e.target.closest('[data-type]');
+    if(ty){CR.type=ty.dataset.type;crPaintTypes();crPaintTags();crChanged();return}
+    const ph=e.target.closest('[data-ph]');
+    if(ph){
+      const tile=ph.closest('.cr-ph'),i=CR.photos.findIndex(t=>String(t.id)===tile.dataset.tid);if(i<0)return;
+      if(ph.dataset.ph==='rm'){const [t]=CR.photos.splice(i,1);crDropPhoto(t)}
+      else if(ph.dataset.ph==='cover'){const [t]=CR.photos.splice(i,1);CR.photos.unshift(t)}
+      crPaintPhotos();crChanged();return;
+    }
+    const lc=e.target.closest('[data-loc]');
+    if(lc){CR.loc=CR.loc===lc.dataset.loc?'':lc.dataset.loc;$('#crLoc').value=CR.loc;$$('#crLocChips .cr-chip').forEach(c=>c.classList.toggle('on',c.dataset.loc===CR.loc));crChanged();return}
+    const tg=e.target.closest('[data-tag]');if(tg){crAddTag(tg.dataset.tag);return}
+    const tx=e.target.closest('[data-tagx]');if(tx){CR.tags=CR.tags.filter(t=>t!==tx.dataset.tagx);crPaintTags();crChanged();return}
+    const av=e.target.closest('#crAud button');if(av){CR.aud=av.dataset.v;crPaintAud();crSaveDraft();return}
+    if(e.target.closest('#crCm')){CR.cm=!CR.cm;crPaintAud();crPreview();crSaveDraft();return}
+    const a=e.target.closest('[data-cr]');if(!a)return;
+    const act=a.dataset.cr;
+    if(act==='close')backFromCreate();
+    else if(act==='post')crPost();
+    else if(act==='pick'){if(CR.photos.length>=CR_MAX)showToast('Up to '+CR_MAX+' photos');else $('#crFile').click()}
+    else if(act==='aud'){CR.aud=CR.aud==='everyone'?'links':'everyone';crPaintAud();crSaveDraft()}
+    else if(act==='discard'){crReset(true);crPaintAll();$('#crDraft').hidden=true;showToast('Draft discarded')}
+  });
+  $('#crFile').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';if(f.length)crAddFiles(f)});
+  const crPh=$('#crPhotos');
+  ['dragenter','dragover'].forEach(n=>crPh.addEventListener(n,e=>{e.preventDefault();crPh.classList.add('over')}));
+  ['dragleave','drop'].forEach(n=>crPh.addEventListener(n,e=>{e.preventDefault();crPh.classList.remove('over')}));
+  crPh.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)crAddFiles(e.dataTransfer.files)});
+  // on a wide screen the preview lives in the right column next to the form
+  function placePreview(){
+    const box=$('#crPrevBox'),rail=$('#rCreate'),host=$('#crPrevHost');if(!box||!rail||!host)return;
+    const want=(isWide()&&curPage==='create')?rail:host;
+    if(box.parentNode!==want){if(want===rail)rail.insertBefore(box,rail.firstChild);else want.appendChild(box)}
+  }
 
   // =====================================================================
   // SETTINGS + ACCOUNT (log out, password, delete)
@@ -1832,4 +2088,5 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   document.addEventListener('click',e=>{if(!e.target.closest('#userMenu,#sUserMore'))closeUserMenu()});
 
   if(curPage==='settings')renderSettings();
+  if(curPage==='create')showCreate();
 }
