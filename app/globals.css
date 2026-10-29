@@ -1333,3 +1333,35 @@ textarea.cr-in{resize:vertical;min-height:120px;line-height:1.5}
 .ep .xp-ph .cr-ph{border-radius:12px}
 .xp-opts{margin-top:12px}
 .ep .cs-err,.xp-opts+.cs-err{min-height:18px;margin-top:8px;font-size:12.5px;font-weight:800;color:#e0364b}
+
+/* ===== Rooms: filter is just an icon; room photo runs edge to edge under the header ===== */
+.rm-filterbtn{background:none;box-shadow:none;border-radius:0;color:var(--ink);width:36px;height:40px;font-size:19px}
+.rm-filterbtn:hover{color:#44546f}
+.rm-filterbtn em{top:2px;right:0}
+.rd-gal-wrap{margin:0;border-radius:0;box-shadow:none}
+.rdetail .d-top{border-bottom:0}
+.rd-gal-wrap .g-slide img{border-radius:0}
+
+/* ===== public pages (what Google and logged-out visitors see at /post/<id> and /rooms/<id>) ===== */
+.pub{position:fixed;inset:0;overflow-y:auto;background:var(--bg);color:var(--ink)}
+.pub-top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;background:rgba(255,255,255,.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.pub-brand{font-size:20px;font-weight:800;text-decoration:none;color:var(--ink)}
+.pub-cta{display:inline-flex;align-items:center;height:40px;padding:0 18px;border-radius:20px;background:var(--ink);color:#fff;font-weight:800;font-size:14px;text-decoration:none}
+.pub-card{max-width:680px;margin:0 auto;background:#fff;min-height:calc(100% - 64px);padding:0 0 40px}
+.pub-ph{display:grid;gap:2px}
+.pub-ph img{width:100%;display:block;max-height:520px;object-fit:cover}
+.pub-in{padding:18px 20px}
+.pub-in h1{font-size:24px;line-height:1.25;font-weight:800}
+.pub-by{margin:8px 0 14px;color:var(--muted);font-size:13.5px;font-weight:700}
+.pub-by b{color:var(--ink)}
+.pub-in p{font-size:15.5px;line-height:1.65;white-space:pre-line}
+.pub-price{margin:12px 0 0;font-size:22px;font-weight:800}
+.pub-price small{font-size:13px;color:var(--muted);font-weight:700}
+.pub-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.pub-tags span{padding:5px 11px;border-radius:14px;background:#fff3c4;color:#3a2a00;font-size:12.5px;font-weight:800}
+.pub-dl{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:16px 0;font-size:14.5px}
+.pub-dl dt{color:var(--muted);font-weight:700}
+.pub-dl dd{font-weight:700}
+.pub-join{margin-top:26px;padding:20px;border-radius:20px;background:#fff8e1;text-align:center}
+.pub-join b{display:block;font-size:17px;font-weight:800;margin-bottom:6px}
+.pub-join span{display:block;color:#6b5a1e;font-size:14px;margin-bottom:14px;font-weight:600}

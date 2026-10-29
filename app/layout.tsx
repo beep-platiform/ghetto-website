@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { SITE } from '../lib/public';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE),
   title: 'Ghetto — Live. Learn. Grow.',
   description: 'Student housing and community in Nyabugogo: rooms, prices, tips and neighbours in one place.',
 };

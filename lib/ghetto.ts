@@ -133,6 +133,32 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     rpc('toggle_link',{p_profile:pid}).catch(()=>{on?LINKED.delete(pid):LINKED.add(pid);paintLinks(pid);bumpStats(pid,!on);fail('Could not save that')});
   }
 
+
+  // =====================================================================
+  // ADDRESSES (every screen has its own link, and Back steps through them)
+  //   /  /rooms  /create  /profile/<name>  /settings          pages
+  //   /post/<id>  /rooms/<id>  /notifications  /search        things opened on top of a page
+  // Opening something on top pushes a history entry; the Back button (or the arrow) pops it, so Back returns to
+  // exactly where you were instead of leaving the site. Refreshing or sharing a link opens the same thing.
+  // =====================================================================
+  let URLSYNC=false,lastPath=location.pathname;
+  (function(){
+    const ps=history.pushState.bind(history),rs=history.replaceState.bind(history);
+    history.pushState=function(){const r=ps.apply(null,arguments);lastPath=location.pathname;return r};
+    history.replaceState=function(){const r=rs.apply(null,arguments);lastPath=location.pathname;return r};
+  })();
+  const isOvPath=p=>/^\/(post\/|notifications$|search$)/.test(p)||/^\/rooms\/[^/]/.test(p);
+  const ovPush=url=>{if(URLSYNC||location.pathname===url)return;try{history.pushState({ov:1},'',url)}catch(e){}};
+  const baseUrl=()=>curPage==='rooms'?'/rooms':curPage==='profile'?(curProfile?profPath(curProfile.handle):'/profile'):curPage==='settings'?'/settings':curPage==='create'?'/create':'/';
+  // close something that was opened on top: go Back if we pushed it, otherwise close it and fix the address
+  function ovBack(close){
+    if(history.state&&history.state.ov){history.back();return}
+    close();
+    const b=baseUrl();if(location.pathname!==b){try{history.replaceState(null,'',b)}catch(e){}}
+  }
+  const ovMissing=()=>{if(isOvPath(location.pathname)){try{history.replaceState(null,'',baseUrl())}catch(e){}}};
+  const DETROOM={};
+
   // nav
   $$('.nav-item').forEach(b=>b.addEventListener('click',()=>{
     const l=b.textContent.trim();
@@ -392,7 +418,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     for(const c of COMMENTS[curId]){if(c.id===cid)return c;for(const r of c.replies)if(r.id===cid)return r}
   }
 
-  function openPost(art,mode){
+  function openPost(art,mode,noPush){
     curArt=art;curId=art.dataset.id;sortMode='top';replyTo=null;
     $('#dReplying').classList.remove('show');dInput.value='';dInput.placeholder='Add a comment...';dSend.classList.remove('ready');
     $('#dSortLabel').textContent='Top comments';
@@ -415,6 +441,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     dScroll.style.scrollBehavior='auto';dScroll.scrollTop=0;dScroll.style.scrollBehavior='';
     layoutComments();$('#rcScroll').scrollTop=0;
     if(mode==='comments')setTimeout(scrollToComments,380);
+    if(!noPush)ovPush('/post/'+curId);
   }
   function closePost(){
     if(!curArt)return;
@@ -484,7 +511,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     openPost(art,toComments?'comments':'top');
   }
   $('#feed').addEventListener('click',feedClick);
-  $('#dBack').addEventListener('click',closePost);
+  $('#dBack').addEventListener('click',()=>ovBack(closePost));
   $('#dMore').addEventListener('click',e=>{if(curArt)openPostMenu(curArt,e.currentTarget)});
 
   dPost.addEventListener('click',e=>{
@@ -540,7 +567,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     dInput.value+=b.textContent;dInput.focus();dSend.classList.add('ready');
   });
   document.addEventListener('keydown',e=>{
-    if(e.key==='Escape'&&detail.classList.contains('open')&&!viewer.classList.contains('open'))closePost();
+    if(e.key==='Escape'&&detail.classList.contains('open')&&!viewer.classList.contains('open'))ovBack(closePost);
   });
 
   // ===== SEARCH + NOTIFICATIONS (slide down from the top) =====
@@ -549,9 +576,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function closeOne(sh){sh.classList.remove('open');sh.setAttribute('aria-hidden','true')}
   function closeSheets(){sheets.forEach(closeOne);sInput.blur()}
   function openSheet(sh){sheets.forEach(x=>{if(x!==sh)closeOne(x)});sh.classList.add('open');sh.setAttribute('aria-hidden','false')}
-  $$('[data-close]').forEach(b=>b.addEventListener('click',closeSheets));
+  $$('[data-close]').forEach(b=>b.addEventListener('click',()=>ovBack(closeSheets)));
   document.addEventListener('keydown',e=>{
-    if(e.key==='Escape'&&!viewer.classList.contains('open')&&!detail.classList.contains('open'))closeSheets();
+    if(e.key==='Escape'&&!viewer.classList.contains('open')&&!detail.classList.contains('open')&&sheets.some(x=>x.classList.contains('open')))ovBack(closeSheets);
   });
 
   // ---- search ----
@@ -632,7 +659,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     sBody.innerHTML=h;
   }
   function openSearch(){
-    sInput.value='';sTab='all';renderSearch();openSheet(sSearch);
+    sInput.value='';sTab='all';renderSearch();openSheet(sSearch);ovPush('/search');
     setTimeout(()=>sInput.focus(),430);
   }
   $('#searchBtn').addEventListener('click',openSearch);
@@ -725,7 +752,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   const nRun=infinite(nMore,nBody,()=>!NT[nTab].done&&sNotif.classList.contains('open'),()=>loadNotifs(nTab));
   function openNotifs(){
-    nTab='all';renderNotifs();nBody.scrollTop=0;openSheet(sNotif);
+    nTab='all';renderNotifs();nBody.scrollTop=0;openSheet(sNotif);ovPush('/notifications');
     setTimeout(nRun,60);
   }
   function setTab(tab){
@@ -752,13 +779,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(nTab==='unread')setTimeout(()=>{NT.unread.items=[];NT.unread.ids=new Set();NT.unread.next=null;NT.unread.done=true;NT.unread.loaded=true;renderNotifs()},350);
   });
   // a post may not be on the page yet (it is older than what has loaded): fetch just that one
-  function openPostById(id,mode){
+  function openPostById(id,mode,noPush){
     let art=$('#feed .post[data-id="'+id+'"]')||DETACHED[id];
-    if(art){openPost(art,mode);return}
+    if(art){openPost(art,mode,noPush);return}
     rpc('get_post',{p_post:id}).then(p=>{
-      if(!p){showToast('That post is no longer available');return}
-      art=makePosts([p])[0];setupPost(art);DETACHED[id]=art;openPost(art,mode);
-    }).catch(()=>fail('Could not open that post'));
+      if(!p){showToast('That post is no longer available');ovMissing();return}
+      art=makePosts([p])[0];setupPost(art);DETACHED[id]=art;openPost(art,mode,noPush);
+    }).catch(()=>{fail('Could not open that post');ovMissing()});
   }
   nBody.addEventListener('click',e=>{
     const el=e.target.closest('.n-item');if(!el)return;
@@ -1141,12 +1168,21 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       $$('#rdDots i').forEach((d,j)=>d.classList.toggle('on',j===k));
     });
   }
-  function openRoom(id){
-    const r=ROOMS.find(x=>x.id===id);if(!r)return;
+  function openRoom(id,noPush){
+    const r=ROOMS.find(x=>x.id===id)||DETROOM[id];if(!r)return;
     curRoom=r;buildRoom(r);
     roomDetail.classList.add('open');roomDetail.setAttribute('aria-hidden','false');
     const sc=$('#rdScroll');sc.style.scrollBehavior='auto';sc.scrollTop=0;sc.style.scrollBehavior='';
     updateRail();
+    if(!noPush)ovPush('/rooms/'+encodeURIComponent(id));
+  }
+  // a room may not be in the pages loaded so far: fetch just that one
+  function openRoomById(id,noPush){
+    if(ROOMS.some(x=>x.id===id)||DETROOM[id]){openRoom(id,noPush);return}
+    rpc('get_room',{p_room:id}).then(r=>{
+      if(!r){showToast('That room is no longer available');ovMissing();return}
+      DETROOM[id]=r;openRoom(id,noPush);
+    }).catch(()=>{fail('Could not open that room');ovMissing()});
   }
   function closeRoom(){
     roomDetail.classList.remove('open');roomDetail.setAttribute('aria-hidden','true');
@@ -1199,7 +1235,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   [filterSheet,contactSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
 
   // ---- events: room detail + right column ----
-  $('#rdBack').addEventListener('click',closeRoom);
+  $('#rdBack').addEventListener('click',()=>ovBack(closeRoom));
   $('#rdSave').addEventListener('click',e=>{if(curRoom)toggleSave(curRoom.id,e.currentTarget)});
   $('#rdContactBtn').addEventListener('click',()=>openContact(curRoom));
   $('#rdBody').addEventListener('click',e=>{
@@ -1243,7 +1279,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(e.key!=='Escape')return;
     if(contactSheet.classList.contains('open')){closeBSheet(contactSheet);return}
     if(filterSheet.classList.contains('open')){closeBSheet(filterSheet);return}
-    if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))closeRoom();
+    if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))ovBack(closeRoom);
   });
 
   // ---- new post: see CREATE A POST below ----
@@ -1617,13 +1653,34 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   // browser back / forward and deep links
   const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':location.pathname.indexOf('/create')===0?'create':'home';
+  // what is open on top, according to the address
+  function syncOverlays(){
+    URLSYNC=true;
+    try{
+      const p=location.pathname,m1=p.match(/^\/post\/([0-9a-f-]{36})$/),m2=p.match(/^\/rooms\/([^/]+)$/);
+      const pid=m1&&m1[1],rid=m2&&decodeURIComponent(m2[1]);
+      if(pid){if(!(detail.classList.contains('open')&&curId===pid))openPostById(pid,'top',true)}
+      else if(detail.classList.contains('open'))closePost();
+      if(rid){if(!(roomDetail.classList.contains('open')&&curRoom&&curRoom.id===rid))openRoomById(rid,true)}
+      else if(roomDetail.classList.contains('open'))closeRoom();
+      if(p==='/notifications'){if(!sNotif.classList.contains('open'))openNotifs()}
+      else if(sNotif.classList.contains('open'))closeSheets();
+      if(p==='/search'){if(!sSearch.classList.contains('open'))openSearch()}
+      else if(sSearch.classList.contains('open'))closeSheets();
+    }finally{URLSYNC=false}
+  }
   window.addEventListener('popstate',()=>{
-    const pg=pagePath();
-    if(navDepth>0)navDepth--;
-    if(pg==='profile'){const seg=location.pathname.split('/')[2];showProfile(seg?decodeURIComponent(seg):ME.handle)}
-    else if(pg==='settings')showSettings();
-    else if(pg==='create')showCreate();
-    else setPage(pg);
+    const wasOv=isOvPath(lastPath),nowOv=isOvPath(location.pathname);
+    lastPath=location.pathname;
+    if(!wasOv&&navDepth>0)navDepth--;
+    if(!nowOv){
+      const pg=pagePath();
+      if(pg==='profile'){const seg=location.pathname.split('/')[2],h=seg?decodeURIComponent(seg):ME.handle;if(!(curPage==='profile'&&curProfile&&curProfile.handle===h))showProfile(h)}
+      else if(pg==='settings'){if(curPage!=='settings')showSettings()}
+      else if(pg==='create'){if(curPage!=='create')showCreate()}
+      else if(pg!==curPage)setPage(pg);
+    }
+    syncOverlays();
   });
   if(curPage==='profile'){
     railReady=true;
@@ -1910,7 +1967,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const clsOf=ic=>/\bfa-(solid|regular|brands)\b/.test(ic)?ic:'fa-solid '+ic;
   function closeMenu(){am.classList.remove('open');am.setAttribute('aria-hidden','true');amItems=[]}
   function openMenu(anchor,title,items,back){
-    amItems=items;
+    amItems=items;amAt=Date.now();
     amHead.hidden=!title;
     amHead.innerHTML=title?(back?'<button type="button" class="opm-bk" data-opm="back" aria-label="Back"><i class="fa-solid fa-arrow-left"></i></button>':'')+'<b>'+esc(title)+'</b>':'';
     amHead.onclick=back?e=>{if(e.target.closest('[data-opm=back]')){closeMenu();back()}}:null;
@@ -1928,7 +1985,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     }else{left=(vw-w)/2;top=Math.max(8,(vh-h)/2)}
     amCard.style.left=left+'px';amCard.style.top=top+'px';
   }
-  window.addEventListener('scroll',()=>{if(am.classList.contains('open'))closeMenu()},true);
+  let amAt=0;
+  window.addEventListener('scroll',e=>{if(am.classList.contains('open')&&Date.now()-amAt>500&&!(e.target&&e.target.nodeType===1&&am.contains(e.target)))closeMenu()},true);
   window.addEventListener('resize',()=>{if(am.classList.contains('open'))closeMenu()});
   am.addEventListener('click',e=>{
     if(e.target.closest('.opm-back')){closeMenu();return}
@@ -1957,8 +2015,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const legacy=()=>{try{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;top:0';document.body.appendChild(a);a.select();const ok=document.execCommand('copy');a.remove();ok?done():showToast(t)}catch(e){showToast(t)}};
     if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(t).then(done,legacy);else legacy();
   }
-  const postLink=id=>location.origin+'/?post='+id;
-  const roomLink=id=>location.origin+'/rooms?room='+encodeURIComponent(id);
+  const postLink=id=>location.origin+'/post/'+id;
+  const roomLink=id=>location.origin+'/rooms/'+encodeURIComponent(id);
   const shareLink=(url,title)=>{if(navigator.share)navigator.share({title:title||'Ghetto',url:url}).catch(()=>{});else copyText(url)};
   const canShare=!!navigator.share;
 
@@ -2251,13 +2309,14 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     openMenu(anchor,'',it);
   }
 
-  // ---- open from a shared link:  /?post=<id>   /rooms?room=<id> ----
+  // ---- opened from a link: /post/<id>, /rooms/<id>, /notifications, /search (older ?post= / ?room= links still work) ----
   (function(){
     try{
       const q=new URLSearchParams(location.search),pid=q.get('post'),rid=q.get('room');
-      if(pid&&/^[0-9a-f-]{36}$/.test(pid)){history.replaceState(null,'',location.pathname);setTimeout(()=>openPostById(pid,'top'),400)}
-      else if(rid&&curPage==='rooms'){history.replaceState(null,'','/rooms');loadAllRooms().then(()=>{if(ROOMS.some(r=>r.id===rid))openRoom(rid);else showToast('That room is no longer available')}).catch(()=>{})}
+      if(pid&&/^[0-9a-f-]{36}$/.test(pid))history.replaceState(null,'','/post/'+pid);
+      else if(rid&&curPage==='rooms')history.replaceState(null,'','/rooms/'+encodeURIComponent(rid));
     }catch(e){}
+    setTimeout(syncOverlays,350);
   })();
   document.addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
