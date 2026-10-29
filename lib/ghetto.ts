@@ -370,7 +370,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const top=isTop?'<span class="c-top"><i class="fa-solid fa-fire"></i>Top comment</span>':'';
     let h='<div class="'+cls+'" data-id="'+c.id+'"><div class="c-av"><img src="'+FACE(c.av)+'" alt="" onerror="this.remove()"></div>'+
       '<div class="c-main"><div class="c-bubble"><b>'+esc(c.name)+badge+top+'</b><p>'+esc(c.text)+'</p></div>'+
-      '<div class="c-meta"><span>'+ago(c.t)+'</span><button type="button" class="c-reply" data-cid="'+c.parent+'" data-name="'+esc(c.name)+'">Reply</button></div>';
+      '<div class="c-meta"><span>'+ago(c.t)+'</span><button type="button" class="c-reply" data-cid="'+c.parent+'" data-name="'+esc(c.name)+'">Reply</button><button type="button" class="c-more" data-cid="'+c.id+'" aria-label="More"><i class="fa-solid fa-ellipsis"></i></button></div>';
     if(!isReply&&c.replies.length){
       h+='<button type="button" class="c-toggle" data-cid="'+c.id+'">'+(c.open?'Hide replies':'View '+c.replies.length+(c.replies.length===1?' reply':' replies'))+'</button>';
       if(c.open)h+='<div class="c-replies">'+c.replies.map(r=>{r.parent=c.id;return itemHTML(r,true,false,authorName)}).join('')+'</div>';
@@ -472,11 +472,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       if(on){const r=$('i',lk).getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}
       return;
     }
-    if(e.target.closest('.action.share')){showToast('Link copied 🔗');return}
+    const shb=e.target.closest('.action.share');
+    if(shb){const sa=shb.closest('.post');if(sa)(navigator.share?shareLink:copyText)(postLink(sa.dataset.id),'Post link copied 🔗');return}
     const fb=e.target.closest('.follow');
     if(fb){toggleLink(fb.closest('.post').dataset.author);return}
     const art=e.target.closest('.post');if(!art)return;
-    if(e.target.closest('.more')){if(art.dataset.author===ME.id)deletePost(art);return}
+    const mb=e.target.closest('.more');if(mb){openPostMenu(art,mb);return}
     // tap a name or photo -> that person's profile
     if(e.target.closest('.post-head .avatar,.post-head .author,.compact-row .head .avatar,.compact-row .head .author')&&!(curProfile&&curPage==='profile'&&curProfile.id===art.dataset.author)){openProfile(HANDLES[art.dataset.author]);return}
     const toComments=!!e.target.closest('.action.cmt,.pc-row,.pc-all');
@@ -484,7 +485,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   $('#feed').addEventListener('click',feedClick);
   $('#dBack').addEventListener('click',closePost);
-  $('#dMore').addEventListener('click',()=>{if(curArt&&curArt.dataset.author===ME.id)deletePost(curArt);else showToast('More options coming soon')});
+  $('#dMore').addEventListener('click',e=>{if(curArt)openPostMenu(curArt,e.currentTarget)});
 
   dPost.addEventListener('click',e=>{
     const b=e.target.closest('[data-act]');if(!b)return;
@@ -494,11 +495,11 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       if(on){const r=$('i',b).getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2)}
     }else if(act==='cmt'){
       scrollToComments();setTimeout(()=>dInput.focus(),350);
-    }else if(act==='share'){showToast('Link copied 🔗')}
+    }else if(act==='share'){(navigator.share?shareLink:copyText)(postLink(curId),'Post link copied 🔗')}
     else if(act==='save'){
-      const on=curArt.dataset.saved!=='1';curArt.dataset.saved=on?'1':'0';
+      const on=curArt.dataset.saved!=='1';
       b.classList.toggle('on',on);$('i',b).className=on?'fa-solid fa-bookmark':'fa-regular fa-bookmark';
-      showToast(on?'Saved to your bookmarks 🔖':'Removed from bookmarks');
+      toggleSavePost(curId);
     }else if(act==='follow'){
       $('.follow',curArt).click();syncDetail();
     }else if(act==='gprev'||act==='gnext'){
@@ -688,7 +689,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     return '<div class="n-item'+(n.unread?' unread':'')+(n.count>1?' grouped':'')+'" data-id="'+n.id+'" style="--i:'+(Math.min(nIdx++,12))+'">'+
       '<div class="n-av"><img src="'+FACE(n.av)+'" alt="" onerror="this.remove()"><span class="n-badge t-'+n.t+'"><i class="fa-solid '+ICON[n.t]+'"></i></span></div>'+
       '<div class="n-main"><p>'+n.html+'</p>'+(n.quote?'<span class="n-quote">“'+esc(n.quote)+'”</span>':'')+'<span class="n-time">'+n.time+'</span></div>'+
-      right+'<span class="n-dot"></span></div>';
+      right+'<button type="button" class="n-more" aria-label="More"><i class="fa-solid fa-ellipsis"></i></button><span class="n-dot"></span></div>';
   }
   const nEmpty=()=>'<div class="d-empty"><div class="s-emoji">'+(nTab==='unread'?'🎉':'🔔')+'</div>'+(nTab==='unread'?'You\'re all caught up':'No notifications yet')+'<small>'+(nTab==='unread'?'New activity will show up here.':'When people like, comment or link with you, you will see it here.')+'</small></div>';
   function paintNMore(){
@@ -1199,7 +1200,6 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   // ---- events: room detail + right column ----
   $('#rdBack').addEventListener('click',closeRoom);
-  $('#rdShare').addEventListener('click',()=>showToast('Link copied 🔗'));
   $('#rdSave').addEventListener('click',e=>{if(curRoom)toggleSave(curRoom.id,e.currentTarget)});
   $('#rdContactBtn').addEventListener('click',()=>openContact(curRoom));
   $('#rdBody').addEventListener('click',e=>{
@@ -1252,7 +1252,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const acts='<div class="post-actions"><button class="action like'+(p.liked?' on':'')+'" data-count="'+(p.likes-(p.liked?1:0))+'"><i class="'+(p.liked?'fa-solid':'fa-regular')+' fa-heart"></i><span>'+p.likes+'</span></button>'+
       '<button class="action cmt"><i class="fa-regular fa-comment"></i><span>0</span></button><button class="action share"><i class="fa-solid fa-share"></i><span>'+p.shares+'</span></button></div>';
     const attrs=' data-id="'+p.id+'" data-author="'+a.id+'"'+(p.category?' data-category="'+esc(p.category)+'"':'')+
-      (p.photos.some(isU)?' data-photos="'+esc(JSON.stringify(p.photos))+'"':'')+(p.commentsOn===false?' data-cm="0"':'')+' style="animation-delay:0s"';
+      (p.photos.some(isU)?' data-photos="'+esc(JSON.stringify(p.photos))+'"':'')+(p.commentsOn===false?' data-cm="0"':'')+(p.saved?' data-saved="1"':'')+' style="animation-delay:0s"';
     const chips=(p.kind==='compact'&&p.sign||(p.tags&&p.tags.length))?'<div class="post-tags">'+(p.kind==='compact'&&p.sign?'<span class="pt-price">'+esc(p.sign)+'</span>':'')+(p.tags||[]).map(t=>'<span>#'+esc(t)+'</span>').join('')+'</div>':'';
     const img=(id,size)=>isU(id)?id:'https://images.unsplash.com/'+id+'?'+size+'&fit=crop';
     if(p.kind==='featured'){
@@ -1267,7 +1267,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
         '<div class="post-title">'+esc(p.title)+(p.subtitle?' <small>'+esc(p.subtitle)+'</small>':'')+'</div><div class="post-copy">'+esc(p.body)+'</div>'+chips+grid+acts+'</article>';
     }
     return '<article class="post compact"'+attrs+'><div class="compact-row"><div class="compact-body"><div class="head"><div class="avatar"><img alt="'+esc(a.name)+'" src="'+FACE(a.avatar)+'"></div>'+
-      '<div><div class="author">'+esc(a.name)+' <em>('+esc(a.role)+')</em></div><div class="meta">'+esc(metaOf(p))+(p.tag==='New'?' <span class="tag">New</span>':'')+'</div></div>'+link+'</div>'+
+      '<div><div class="author">'+esc(a.name)+' <em>('+esc(a.role)+')</em></div><div class="meta">'+esc(metaOf(p))+(p.tag==='New'?' <span class="tag">New</span>':'')+'</div></div>'+link+'<button class="more" aria-label="More"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>'+
       '<div class="compact-title">'+esc(p.title)+'</div><div class="compact-copy">'+esc(p.body)+'</div>'+chips+'</div>'+
       (p.photos[0]?'<div class="thumb"><img alt="'+esc(p.title)+'" src="'+img(p.photos[0],'w=240&h=280')+'"></div>':'')+'</div>'+acts+'</article>';
   }
@@ -1305,6 +1305,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // =====================================================================
   const editSheet=$('#editSheet'),linksSheet=$('#linksSheet'),pfBody=$('#pfBody'),pfScroll=$('#pfScroll');
   let curProfile=null,pfTab='posts',navDepth=0,prevPage='home',loadSeq=0,pendingEdit=false;
+  const SP={count:0,next:null,done:false,started:false,busy:false}; // saved posts (the Saved tab)
   const profPath=h=>h===ME.handle?'/profile':'/profile/'+encodeURIComponent(h);
   const roomsOf=p=>ROOMS.filter(r=>r.ll.id===p.id);
   const countTxt=n=>n>=10000?Math.round(n/1000)+'k':n>=1000?(n/1000).toFixed(1).replace('.0','')+'k':String(n);
@@ -1336,7 +1337,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     pfBody.innerHTML=
       '<header class="pf-top"><button type="button" class="pf-ico" data-pf="back" aria-label="Back"'+(p.isMe?' hidden':'')+'><i class="fa-solid fa-arrow-left"></i></button>'+
       '<div class="pf-tt"><b>'+esc(p.name)+'</b><small>@'+esc(p.handle)+'</small></div>'+
-      '<button type="button" class="pf-ico" data-pf="share" aria-label="Share profile"><i class="fa-solid fa-share-nodes"></i></button>'+
+      '<button type="button" class="pf-ico" data-pf="more" aria-label="More options"><i class="fa-solid fa-ellipsis"></i></button>'+
       (p.isMe?'<button type="button" class="pf-ico" data-pf="settings" aria-label="Settings"><i class="fa-solid fa-gear"></i></button>':'')+'</header>'+
       '<div class="pf-cover"'+cover+'></div>'+
       '<div class="pf-card"><div class="pf-avrow"><div class="avatar pf-av"><img src="'+FACE(p.avatar)+'" alt="'+esc(p.name)+'" onerror="this.remove()"></div><div class="pf-actions">'+actions+'</div></div>'+
@@ -1358,7 +1359,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function renderPfList(){
     const p=curProfile,list=$('#pfList');if(!p||!list)return;
     $$('#pfTabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.pt===pfTab));
-    const sc=$('#pfTabs .tab[data-pt="saved"] .tc');if(sc)sc.textContent=saved.size;
+    const sc=$('#pfTabs .tab[data-pt="saved"] .tc');if(sc)sc.textContent=saved.size+(p.isMe?SP.count:0);
     if(pfTab==='posts'&&p.restricted){
       list.className='feed pf-list';
       list.innerHTML='<div class="pf-empty"><div class="s-emoji">🔒</div><b>This account is private</b>Link with '+esc(p.name.split(' ')[0])+' to see their posts.</div>';
@@ -1376,6 +1377,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(ROOMSNEXT)loadAllRooms().then(()=>{if(curProfile===p&&pfTab!=='posts')renderPfList()}).catch(()=>{});
     const rooms=pfTab==='rooms'?roomsOf(p):ROOMS.filter(r=>saved.has(r.id));
     list.className='pf-rooms';
+    if(pfTab==='saved'&&p.isMe){
+      list.innerHTML=(rooms.length?'<div class="pf-sec-h"><i class="fa-solid fa-house"></i>Saved rooms</div><div class="rm-grid">'+rooms.map((r,i)=>cardHTML(r,i,false)).join('')+'</div>':'')+
+        '<div class="pf-sec-h"><i class="fa-solid fa-bookmark"></i>Saved posts</div><div class="feed pf-list" id="spList"></div>'+
+        '<div class="pf-empty" id="spEmpty" hidden><div class="s-emoji">🔖</div><b>No saved posts</b>Tap ⋯ on any post and choose Save post to keep it here.</div>';
+      spReset();loadSavedPosts();paintPfMore();
+      return;
+    }
     list.innerHTML=rooms.length?'<div class="rm-grid">'+rooms.map((r,i)=>cardHTML(r,i,false)).join('')+'</div>'
       :'<div class="pf-empty"><div class="s-emoji">'+(pfTab==='saved'?'❤️':'🏠')+'</div><b>'+(pfTab==='saved'?'No saved rooms':'No rooms listed')+'</b>'+
        (pfTab==='saved'?'Tap the heart on any room to keep it here.':esc(p.name.split(' ')[0])+' has no rooms listed yet.')+'</div>';
@@ -1389,6 +1397,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function paintPfMore(){
     const p=curProfile,pp=p&&p._pp,m=$('#pfMore');if(!m)return;
+    if(pfTab==='saved'&&p&&p.isMe){m.hidden=!(SP.started&&(!SP.done||SP.busy));return}
     m.hidden=!(pfTab==='posts'&&pp&&pp.started&&(!pp.done||pp.busy)&&!p.restricted);
   }
   function loadPfPosts(p){
@@ -1404,7 +1413,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     }).finally(()=>{pp.busy=false;paintPfMore()});
   }
   const pfMoreEl=$('#pfMore');
-  const pfRun=infinite(pfMoreEl,pfScroll,()=>{const p=curProfile,pp=p&&p._pp;return curPage==='profile'&&pfTab==='posts'&&!!pp&&pp.started&&!pp.done&&!p.restricted},()=>loadPfPosts(curProfile));
+  const pfRun=infinite(pfMoreEl,pfScroll,()=>{const p=curProfile,pp=p&&p._pp;if(curPage==='profile'&&pfTab==='saved'&&p&&p.isMe)return SP.started&&!SP.done&&!SP.busy;return curPage==='profile'&&pfTab==='posts'&&!!pp&&pp.started&&!pp.done&&!p.restricted},()=>pfTab==='saved'?loadSavedPosts():loadPfPosts(curProfile));
   function paintStats(){
     const p=curProfile;if(!p)return;
     const set=(id,v)=>{const el=$(id);if(el)el.textContent=countTxt(v)};
@@ -1498,28 +1507,11 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(act==='compose')openCreate();
     else if(act==='settings')openSettings();
     else if(act==='message')showToast('Messages are coming soon 💬');
-    else if(act==='share'){
-      const url=location.origin+profPath(curProfile.handle);
-      try{navigator.clipboard.writeText(url).then(()=>showToast('Profile link copied 🔗'),()=>showToast(url))}catch(err){showToast(url)}
-    }
+    else if(act==='more')openProfileMenu(a);
   }
   pfBody.addEventListener('click',pfClick);
   $('#sUser').addEventListener('click',()=>openProfile(ME.handle));
   $('#topMe').addEventListener('click',()=>openProfile(ME.handle));
-
-  // ---- delete my post ----
-  function deletePost(art){
-    if(!art||art.dataset.author!==ME.id)return;
-    if(!confirm('Delete this post? This cannot be undone.'))return;
-    const id=art.dataset.id;
-    rpc('delete_post',{p_post:id}).then(()=>{
-      if(detail.classList.contains('open')&&curId===id)closePost();
-      $$('.post[data-id="'+id+'"]').forEach(x=>x.remove());
-      delete COMMENTS[id];LOADED.delete(id);delete PMETA[id];
-      if(curProfile&&curProfile.isMe){curProfile.posts=Math.max(0,curProfile.posts-1);paintStats();if(curPage==='profile'&&pfTab==='posts')renderPfList()}
-      showToast('Post deleted 🗑️');
-    }).catch(()=>fail('Could not delete that post'));
-  }
 
   // ---- Links / Linking list ----
   let lsKind='links';
@@ -1785,7 +1777,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function crDropPhoto(t,keepRemote){
     if(t.url){try{URL.revokeObjectURL(t.url)}catch(e){}}
-    if(t.remote&&!keepRemote)removePostImages([t.remote]);
+    if(t.remote&&!keepRemote)purgePhotos([t.remote]).catch(()=>{});
   }
 
   // ---- open / close ----
@@ -1823,12 +1815,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     crPosting=true;crBusyUI(true,CR.photos.length?'Uploading…':'Posting…');
     try{
       const todo=CR.photos.filter(t=>!t.remote),total=CR.photos.length;let q=0,done=total-todo.length;
-      const run=async()=>{while(q<todo.length){const t=todo[q++];t.remote=await uploadPostImage(t.blob,t.ext);done++;crBusyUI(true,'Uploading '+done+'/'+total)}};
+      const run=async()=>{while(q<todo.length){const t=todo[q++];t.remote=await uploadPostImage(t.blob,t.ext);trashAdd([t.remote],600000);done++;crBusyUI(true,'Uploading '+done+'/'+total)}};
       await Promise.all(Array.from({length:Math.min(3,todo.length)},run));
       crBusyUI(true,'Posting…');
       const t=crType();
       const p=await rpc('create_post',{p_title:CR.title.trim(),p_body:CR.body.trim(),p_location:CR.loc.trim()||null,p_type:CR.type,p_photos:CR.photos.map(x=>x.remote),
         p_price:t.price&&+CR.price>0?+CR.price:null,p_tags:CR.tags,p_audience:CR.aud,p_comments:CR.cm,p_alt:CR.photos.length&&CR.alt.trim()?CR.alt.trim():null});
+      trashDrop(CR.photos.map(x=>x.remote));
       crAfterPost(p);
     }catch(e){
       const m=String((e&&e.message)||'');
@@ -1907,6 +1900,367 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const want=(isWide()&&curPage==='create')?rail:host;
     if(box.parentNode!==want){if(want===rail)rail.insertBefore(box,rail.firstChild);else want.appendChild(box)}
   }
+
+  // =====================================================================
+  // THREE-DOT MENUS, EDIT / REPORT / DELETE, AND KEEPING STORAGE CLEAN
+  // One menu (a popover on desktop, a bottom sheet on phones) is used everywhere a "⋯" button is.
+  // =====================================================================
+  const am=$('#actMenu'),amCard=$('#amCard'),amList=$('#amList'),amHead=$('#amHead');
+  let amItems=[];
+  const clsOf=ic=>/\bfa-(solid|regular|brands)\b/.test(ic)?ic:'fa-solid '+ic;
+  function closeMenu(){am.classList.remove('open');am.setAttribute('aria-hidden','true');amItems=[]}
+  function openMenu(anchor,title,items,back){
+    amItems=items;
+    amHead.hidden=!title;
+    amHead.innerHTML=title?(back?'<button type="button" class="am-bk" data-am="back" aria-label="Back"><i class="fa-solid fa-arrow-left"></i></button>':'')+'<b>'+esc(title)+'</b>':'';
+    amHead.onclick=back?e=>{if(e.target.closest('[data-am=back]')){closeMenu();back()}}:null;
+    amList.innerHTML=items.map((x,i)=>'<button type="button" role="menuitem" class="am-it'+(x.danger?' danger':'')+'" data-i="'+i+'"><i class="'+clsOf(x.icon)+'"></i><span><b>'+esc(x.t)+'</b>'+(x.s?'<small>'+esc(x.s)+'</small>':'')+'</span></button>').join('');
+    amCard.style.cssText='';
+    if(window.innerWidth>=760&&anchor){
+      const r=anchor.getBoundingClientRect(),w=268;
+      let left=Math.min(Math.max(8,r.right-w),window.innerWidth-w-8);
+      amCard.style.left=left+'px';amCard.style.width=w+'px';
+      am.classList.add('open');am.setAttribute('aria-hidden','false');
+      const h=amCard.offsetHeight;
+      const top=r.bottom+6+h>window.innerHeight-8?Math.max(8,r.top-h-6):r.bottom+6;
+      amCard.style.top=top+'px';
+    }else{am.classList.add('open');am.setAttribute('aria-hidden','false')}
+  }
+  am.addEventListener('click',e=>{
+    if(e.target.closest('.am-back')){closeMenu();return}
+    const b=e.target.closest('.am-it');if(!b)return;
+    const it=amItems[+b.dataset.i];closeMenu();
+    if(it&&it.fn)setTimeout(it.fn,0);
+  });
+
+  // ---- a small yes / no box (replaces the browser's confirm()) ----
+  const cfSheet=$('#cfSheet');let cfDone=null;
+  function confirmBox(o){
+    return new Promise(res=>{
+      $('#cfTitle').textContent=o.title;$('#cfText').textContent=o.text||'';
+      const go=$('#cfGo');go.textContent=o.ok||'Delete';go.className='cs-send '+(o.danger===false?'':'danger');
+      cfDone=res;openBSheet(cfSheet);
+    });
+  }
+  function cfClose(v){closeBSheet(cfSheet);const f=cfDone;cfDone=null;if(f)f(v)}
+  $('#cfGo').addEventListener('click',()=>cfClose(true));
+  $('#cfNo').addEventListener('click',()=>cfClose(false));
+  cfSheet.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))cfClose(false)});
+
+  // ---- links ----
+  function copyText(t,msg){
+    const done=()=>showToast(msg||'Link copied 🔗');
+    const legacy=()=>{try{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;top:0';document.body.appendChild(a);a.select();const ok=document.execCommand('copy');a.remove();ok?done():showToast(t)}catch(e){showToast(t)}};
+    if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(t).then(done,legacy);else legacy();
+  }
+  const postLink=id=>location.origin+'/?post='+id;
+  const roomLink=id=>location.origin+'/rooms?room='+encodeURIComponent(id);
+  const shareLink=(url,title)=>{if(navigator.share)navigator.share({title:title||'Ghetto',url:url}).catch(()=>{});else copyText(url)};
+  const canShare=!!navigator.share;
+
+  // ---- storage clean-up: a photo that is removed, or belongs to a post that is deleted, is deleted from the bucket ----
+  // Anything that could not be removed (offline) waits in this queue and is retried the next time the app opens.
+  // Photos uploaded for a post that was never finished are queued too, with a 10 minute hold so a post being made in another tab is safe.
+  const TRASH_K='ghetto.trash.'+ME.id;
+  const trashGet=()=>{try{const a=JSON.parse(localStorage.getItem(TRASH_K)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}};
+  const trashSet=a=>{try{a.length?localStorage.setItem(TRASH_K,JSON.stringify(a)):localStorage.removeItem(TRASH_K)}catch(e){}};
+  function trashAdd(urls,hold){const now=Date.now(),a=trashGet(),have=new Set(a.map(x=>x.u));urls.forEach(u=>{if(u&&!have.has(u)){a.push({u:u,t:now,h:hold||0});have.add(u)}});trashSet(a)}
+  function trashDrop(urls){const s=new Set(urls);trashSet(trashGet().filter(x=>!s.has(x.u)))}
+  async function purgePhotos(urls){
+    urls=(urls||[]).filter(u=>typeof u==='string'&&u.indexOf('/post-images/')>-1);
+    if(!urls.length)return;
+    trashAdd(urls,0);
+    const bad=await removePostImages(urls);
+    trashDrop(urls.filter(u=>bad.indexOf(u)<0));
+  }
+  async function purgeTrash(){
+    const now=Date.now(),due=trashGet().filter(x=>now-x.t>=(x.h||0)).map(x=>x.u);
+    if(!due.length)return;
+    const bad=await removePostImages(due);
+    trashDrop(due.filter(u=>bad.indexOf(u)<0));
+  }
+  setTimeout(()=>{purgeTrash().catch(()=>{})},3000);
+  window.addEventListener('online',()=>{purgeTrash().catch(()=>{})});
+
+  // ---- saved posts (the Saved tab of your profile) ----
+  rpc('get_saved_posts',{p_limit:1}).then(r=>{SP.count=r.count||0;const t=$('#pfTabs .tab[data-pt="saved"] .tc');if(t)t.textContent=saved.size+SP.count}).catch(()=>{});
+  const spReset=()=>{SP.next=null;SP.done=false;SP.started=false;SP.busy=false};
+  function loadSavedPosts(){
+    const box=$('#spList');
+    if(!box||SP.busy||SP.done)return Promise.resolve();
+    SP.busy=true;SP.started=true;paintPfMore();
+    const cur=SP.next;
+    return rpc('get_saved_posts',{p_limit:8,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null}).then(r=>{
+      const b2=$('#spList');if(!b2)return;
+      const fresh=r.posts.filter(x=>!b2.querySelector('.post[data-id="'+x.id+'"]'));
+      makePosts(fresh).forEach(a=>{a.style.animationDelay='0s';b2.appendChild(a);setupPost(a)});
+      SP.next=r.next||null;SP.done=!r.next;SP.count=r.count;
+      const t=$('#pfTabs .tab[data-pt="saved"] .tc');if(t)t.textContent=saved.size+SP.count;
+      const none=$('#spEmpty');if(none)none.hidden=!!b2.querySelector('.post')||!SP.done;
+    }).catch(()=>{fail('Could not load saved posts')}).finally(()=>{SP.busy=false;paintPfMore()});
+  }
+
+  // ---- changing a post everywhere it is shown ----
+  const postEls=id=>$$('.post[data-id="'+id+'"]');
+  function setCmState(art){
+    const off=art&&art.dataset.cm==='0';
+    dInput.disabled=!!off;dInput.placeholder=off?'Comments are turned off for this post':'Add a comment...';
+  }
+  function applyPostUpdate(p){
+    const inDetail=detail.classList.contains('open')&&curId===p.id;
+    let first=null;
+    postEls(p.id).forEach(old=>{
+      const a=makePosts([p])[0];a.style.animationDelay='0s';
+      if(old===curArt)first=a;
+      old.replaceWith(a);setupPost(a);
+    });
+    if(DETACHED[p.id]){const a=makePosts([p])[0];setupPost(a);DETACHED[p.id]=a;if(!first&&inDetail)first=a}
+    if(inDetail&&first){curArt=first;buildPost(first);setCmState(first)}
+  }
+  const updArgs=(p,o)=>({p_post:p.id,p_title:o.title!==undefined?o.title:p.title,p_body:o.body!==undefined?o.body:p.body,
+    p_location:o.location!==undefined?o.location:(p.location||null),p_price:o.price!==undefined?o.price:(p.price==null?null:p.price),
+    p_tags:o.tags!==undefined?o.tags:(p.tags||[]),p_audience:o.audience!==undefined?o.audience:(p.audience||'everyone'),
+    p_comments:o.comments!==undefined?o.comments:p.commentsOn!==false,p_alt:o.alt!==undefined?o.alt:(p.alt||null),
+    p_photos:o.photos!==undefined?o.photos:(p.photos||[])});
+  async function toggleComments(id){
+    try{
+      const p=await rpc('get_post',{p_post:id});if(!p)throw new Error('gone');
+      const on=p.commentsOn===false;
+      const r=await rpc('update_post',updArgs(p,{comments:on}));
+      applyPostUpdate(r.post);showToast(on?'Comments turned on 💬':'Comments turned off');
+    }catch(e){fail('Could not change that')}
+  }
+  async function toggleSavePost(id){
+    const els=postEls(id),was=els.some(a=>a.dataset.saved==='1'),det=DETACHED[id];
+    const paint=v=>{els.concat(det?[det]:[]).forEach(a=>{if(v)a.dataset.saved='1';else delete a.dataset.saved})};
+    paint(!was);SP.count=Math.max(0,SP.count+(was?-1:1));
+    showToast(was?'Removed from saved':'Saved 🔖');
+    try{
+      const on=await rpc('toggle_saved_post',{p_post:id});
+      if(on!==!was){paint(on);SP.count=Math.max(0,SP.count+(on?1:-1))}
+    }catch(e){paint(was);SP.count=Math.max(0,SP.count+(was?1:-1));fail('Could not save that')}
+    spReset();
+    const t=$('#pfTabs .tab[data-pt="saved"] .tc');if(t)t.textContent=saved.size+SP.count;
+    if(curPage==='profile'&&pfTab==='saved'&&curProfile&&curProfile.isMe)renderPfList();
+  }
+  function hidePost(id){
+    rpc('hide_post',{p_post:id}).then(()=>{
+      $$('#feed .post[data-id="'+id+'"]').forEach(a=>a.remove());
+      if(detail.classList.contains('open')&&curId===id)closePost();
+      showToast('Post hidden 🙈');
+    }).catch(()=>fail('Could not hide that'));
+  }
+
+  // ---- report ----
+  const REPORT_WHY=[['spam','fa-ban','Spam or advert'],['scam','fa-triangle-exclamation','Scam or fake listing'],['inappropriate','fa-circle-exclamation','Inappropriate content'],
+    ['harassment','fa-hand','Harassment or hate'],['wrong_info','fa-circle-info','Wrong or misleading info'],['other','fa-ellipsis','Something else']];
+  function openReport(kind,target,anchor,back){
+    openMenu(anchor,'Why are you reporting this?',REPORT_WHY.map(w=>({icon:w[1],t:w[2],fn:()=>{
+      rpc('report_content',{p_kind:kind,p_target:String(target),p_reason:w[0],p_note:null})
+        .then(()=>showToast('Thanks. We will take a look 🛡️')).catch(e=>fail(/Nothing to report/.test(e&&e.message)?'That is no longer there':'Could not send the report'));
+    }})),back);
+  }
+
+  // ---- post menu (the ⋯ on a post, in the feed, on a profile, and in the open post) ----
+  function openPostMenu(art,anchor){
+    if(!art)return;
+    const id=art.dataset.id,aid=art.dataset.author,own=aid===ME.id,saved=art.dataset.saved==='1',cmOff=art.dataset.cm==='0';
+    const first=(PNAME[aid]||'this person').split(' ')[0],linked=LINKED.has(aid),it=[];
+    if(own){
+      it.push({icon:'fa-pen',t:'Edit post',s:'Text, topics, photos, who can see it',fn:()=>openEditPost(id)});
+      it.push({icon:cmOff?'fa-comment':'fa-comment-slash',t:cmOff?'Turn on comments':'Turn off comments',fn:()=>toggleComments(id)});
+    }else it.push({icon:saved?'fa-solid fa-bookmark':'fa-regular fa-bookmark',t:saved?'Remove from saved':'Save post',fn:()=>toggleSavePost(id)});
+    it.push({icon:'fa-link',t:'Copy link',fn:()=>copyText(postLink(id),'Post link copied 🔗')});
+    if(canShare)it.push({icon:'fa-share-nodes',t:'Share…',fn:()=>shareLink(postLink(id),(($('.post-title,.compact-title',art)||{}).textContent||'').trim())});
+    if(!own){
+      it.push({icon:linked?'fa-user-minus':'fa-user-plus',t:(linked?'Unlink ':'Link with ')+first,fn:()=>toggleLink(aid)});
+      it.push({icon:'fa-eye-slash',t:'Not interested',s:'Hide this post from your feed',fn:()=>hidePost(id)});
+      it.push({icon:'fa-flag',t:'Report post',danger:true,fn:()=>openReport('post',id,anchor,()=>openPostMenu(art,anchor))});
+    }else it.push({icon:'fa-trash',t:'Delete post',s:'Also deletes its photos',danger:true,fn:()=>deletePost(art)});
+    openMenu(anchor,'',it);
+  }
+
+  // ---- delete my post (and its photos from storage) ----
+  async function deletePost(art){
+    if(!art||art.dataset.author!==ME.id)return;
+    const ok=await confirmBox({title:'Delete this post?',text:'The post, its comments and all its photos will be deleted for good.',ok:'Delete post'});
+    if(!ok)return;
+    const id=art.dataset.id;
+    try{
+      const r=await rpc('delete_post',{p_post:id});
+      if(detail.classList.contains('open')&&curId===id)closePost();
+      postEls(id).forEach(x=>x.remove());delete DETACHED[id];
+      delete COMMENTS[id];LOADED.delete(id);delete PMETA[id];
+      if(curProfile&&curProfile.isMe){curProfile.posts=Math.max(0,curProfile.posts-1);paintStats();if(curPage==='profile'&&pfTab==='posts')renderPfList()}
+      showToast('Post deleted 🗑️');
+      purgePhotos(r&&r.photos).catch(()=>{});
+    }catch(e){fail('Could not delete that post')}
+  }
+
+  // ---- edit my post ----
+  const xpSheet=$('#xpSheet');
+  let XP=null;
+  const xpClean=s=>String(s||'').toLowerCase().replace(/[^a-z0-9_ ]/g,'');
+  function xpPaintPhotos(){
+    const box=$('#xpPhotos');
+    box.innerHTML=XP.photos.map((u,i)=>'<div class="cr-ph"><img alt="" src="'+esc(u)+'"><button type="button" class="cr-rm" data-xrm="'+i+'" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button></div>').join('');
+    $('#xpPhBox').hidden=!(XP.photos.length||XP.removed.length);
+    $('#xpPhNote').textContent=XP.removed.length?XP.removed.length+(XP.removed.length===1?' photo':' photos')+' will be deleted from storage when you save.':'Taking a photo off deletes the file for good.';
+    $('#xpAltBox').hidden=!XP.photos.length;
+  }
+  function xpPaintOpts(){
+    $$('#xpAud button').forEach(b=>{const on=b.dataset.v===XP.aud;b.classList.toggle('on',on);b.setAttribute('aria-checked',String(on))});
+    const s=$('#xpCm');s.classList.toggle('on',XP.cm);s.setAttribute('aria-checked',String(XP.cm));
+  }
+  function openEditPost(id){
+    rpc('get_post',{p_post:id}).then(p=>{
+      if(!p||p.author.id!==ME.id){showToast('You can only edit your own posts');return}
+      XP={id:p.id,type:p.type||'tip',photos:(p.photos||[]).filter(u=>/^https?:/.test(u)),removed:[],aud:p.audience||'everyone',cm:p.commentsOn!==false,hadPrice:p.price!=null,orig:p};
+      const tl=(CR_TYPES.find(t=>t.id===XP.type)||{label:'Post'}).label;
+      $('#xpType').textContent=tl+' · posted '+p.ago+(p.ago==='Just now'?'':' ago');
+      $('#xpTitle').value=p.title;$('#xpBody').value=p.body;$('#xpLoc').value=p.location||'';$('#xpTags').value=(p.tags||[]).join(' ');$('#xpAlt').value=p.alt||'';
+      $('#xpPrice').value=p.price!=null?crFmt(p.price):'';
+      $('#xpPriceBox').hidden=!(XP.type==='room'||XP.type==='price');
+      $('#xpBodyN').textContent=p.body.length+'/2000';$('#xpErr').textContent='';$('#xpSave').disabled=false;
+      xpPaintPhotos();xpPaintOpts();openBSheet(xpSheet);
+    }).catch(()=>fail('Could not open that post'));
+  }
+  xpSheet.addEventListener('click',e=>{
+    if(e.target.closest('.bs-back,.bs-close')){closeBSheet(xpSheet);return}
+    const rm=e.target.closest('[data-xrm]');
+    if(rm){const [u]=XP.photos.splice(+rm.dataset.xrm,1);XP.removed.push(u);xpPaintPhotos();return}
+    const av=e.target.closest('#xpAud button');if(av){XP.aud=av.dataset.v;xpPaintOpts();return}
+    if(e.target.closest('#xpCm')){XP.cm=!XP.cm;xpPaintOpts()}
+  });
+  $('#xpBody').addEventListener('input',e=>{$('#xpBodyN').textContent=e.target.value.length+'/2000'});
+  $('#xpPrice').addEventListener('input',e=>{const d=e.target.value.replace(/\D/g,'').slice(0,9);e.target.value=d?crFmt(d):''});
+  $('#xpSave').addEventListener('click',async()=>{
+    if(!XP)return;
+    const title=$('#xpTitle').value.trim(),body=$('#xpBody').value.trim(),err=$('#xpErr');
+    if(!title){err.textContent='Add a title';return}
+    if(!body){err.textContent='Write a few details';return}
+    const priced=XP.type==='room'||XP.type==='price',pr=+($('#xpPrice').value.replace(/\D/g,'')||0);
+    if(priced&&!pr){err.textContent='Add the price';return}
+    err.textContent='';
+    const tags=[...new Set(xpClean($('#xpTags').value).split(/\s+/).filter(x=>x.length>=2))].slice(0,5);
+    const btn=$('#xpSave');btn.disabled=true;
+    try{
+      const r=await rpc('update_post',updArgs(XP.orig,{title:title,body:body,location:$('#xpLoc').value.trim()||null,price:priced?pr:null,tags:tags,
+        audience:XP.aud,comments:XP.cm,alt:XP.photos.length&&$('#xpAlt').value.trim()?$('#xpAlt').value.trim():null,photos:XP.photos}));
+      closeBSheet(xpSheet);applyPostUpdate(r.post);showToast('Post updated ✅');
+      purgePhotos(r.removed).catch(()=>{});
+      XP=null;
+    }catch(e){err.textContent=(e&&e.message&&e.message.length<80)?e.message:'Could not save. Try again';btn.disabled=false}
+  });
+
+  // ---- comment menu ----
+  function openCommentMenu(c,anchor){
+    if(!c)return;
+    const own=!!c.mine,postOwner=curArt&&curArt.dataset.author===ME.id,it=[];
+    it.push({icon:'fa-copy',t:'Copy comment',fn:()=>copyText(c.text,'Comment copied')});
+    if(own||postOwner)it.push({icon:'fa-trash',t:'Delete comment',s:c.replies&&c.replies.length?'Its replies are deleted too':'',danger:true,fn:()=>deleteComment(c)});
+    if(!own)it.push({icon:'fa-flag',t:'Report comment',danger:true,fn:()=>openReport('comment',c.id,anchor,()=>openCommentMenu(c,anchor))});
+    openMenu(anchor,'',it);
+  }
+  async function deleteComment(c){
+    const ok=await confirmBox({title:'Delete this comment?',text:c.replies&&c.replies.length?'Its replies will be deleted too.':'This cannot be undone.',ok:'Delete'});
+    if(!ok||!curArt)return;
+    const pid=curId;
+    try{
+      await rpc('delete_comment',{p_comment:c.id});
+      const arr=COMMENTS[pid];
+      if(arr){
+        const top=arr.findIndex(x=>x.id===c.id);
+        if(top>-1)arr.splice(top,1);else arr.forEach(x=>{x.replies=x.replies.filter(r=>r.id!==c.id)});
+        order=order.filter(x=>x!==c.id);
+      }
+      if(curArt&&curId===pid){computeOrder();renderList();refreshPreview(curArt)}
+      showToast('Comment deleted 🗑️');
+    }catch(e){fail('Could not delete that comment')}
+  }
+  dList.addEventListener('click',e=>{
+    const b=e.target.closest('.c-more');if(!b)return;
+    e.stopPropagation();
+    const c=findC(+b.dataset.cid);
+    if(!c||c.id<0){showToast('Still sending… try again in a second');return}
+    openCommentMenu(c,b);
+  },true);
+
+  // ---- notification menu ----
+  const NK={like:['notify_likes','likes'],comment:['notify_comments','comments'],mention:['notify_comments','comments'],follow:['notify_links','new links'],house:['notify_rooms','room updates'],price:['notify_prices','price updates']};
+  function dropNotifs(pred){
+    ['all','unread'].forEach(k=>{const t=NT[k];t.items=t.items.filter(x=>!pred(x));if(t.ids){const keep=new Set(t.items.map(x=>x.id));t.ids=keep}});
+    renderNotifs();
+  }
+  function openNotifMenu(n,el,anchor){
+    const it=[];
+    if(n.unread)it.push({icon:'fa-check',t:'Mark as read',fn:()=>markRead(n,el)});
+    it.push({icon:'fa-trash',t:'Remove this notification',fn:()=>{
+      rpc('delete_notifications',{p_ids:n.ids||[+n.id]}).then(c=>{
+        if(typeof c==='number'){UNREAD=c;updateBell()}
+        dropNotifs(x=>x.id===n.id);showToast('Notification removed');
+      }).catch(()=>fail('Could not remove that'));
+    }});
+    const k=NK[n.t];
+    if(k)it.push({icon:'fa-bell-slash',t:'Turn off '+k[1],s:'You can turn it back on in Settings',fn:()=>{
+      rpc('update_setting',{p_key:k[0],p_value:false}).then(()=>{
+        if(typeof SET!=='undefined'&&SET){for(const c in SKEY)if(SKEY[c]===k[0])SET[c]=false}
+        dropNotifs(x=>NK[x.t]&&NK[x.t][0]===k[0]);
+        showToast('You will not get '+k[1]+' notifications');
+      }).catch(()=>fail('Could not change that'));
+    }});
+    openMenu(anchor,'',it);
+  }
+  nBody.addEventListener('click',e=>{
+    const b=e.target.closest('.n-more');if(!b)return;
+    e.stopPropagation();
+    const el=b.closest('.n-item'),n=el&&NT[nTab].items.find(x=>x.id===el.dataset.id);
+    if(n)openNotifMenu(n,el,b);
+  },true);
+
+  // ---- room menu ----
+  function openRoomMenu(anchor){
+    const r=curRoom;if(!r)return;
+    const it=[{icon:'fa-link',t:'Copy link',fn:()=>copyText(roomLink(r.id),'Room link copied 🔗')}];
+    if(canShare)it.push({icon:'fa-share-nodes',t:'Share…',fn:()=>shareLink(roomLink(r.id),r.title)});
+    it.push({icon:'fa-flag',t:'Report this listing',danger:true,fn:()=>openReport('room',r.id,anchor,()=>openRoomMenu(anchor))});
+    openMenu(anchor,'',it);
+  }
+  $('#rdMore').addEventListener('click',e=>openRoomMenu(e.currentTarget));
+  $('#rdShare').addEventListener('click',()=>{if(curRoom)shareLink(roomLink(curRoom.id),curRoom.title)});
+
+  // ---- profile menu ----
+  function openProfileMenu(anchor){
+    const p=curProfile;if(!p)return;
+    const url=location.origin+profPath(p.handle),it=[];
+    if(p.isMe){
+      it.push({icon:'fa-user-pen',t:'Edit profile',fn:()=>openEdit()});
+      it.push({icon:'fa-gear',t:'Settings',fn:()=>openSettings()});
+    }
+    it.push({icon:'fa-link',t:'Copy profile link',fn:()=>copyText(url,'Profile link copied 🔗')});
+    if(canShare)it.push({icon:'fa-share-nodes',t:'Share profile…',fn:()=>shareLink(url,p.name)});
+    if(!p.isMe){
+      const on=LINKED.has(p.id);
+      it.push({icon:on?'fa-user-minus':'fa-user-plus',t:(on?'Unlink ':'Link with ')+p.name.split(' ')[0],fn:()=>toggleLink(p.id)});
+      it.push({icon:'fa-flag',t:'Report profile',danger:true,fn:()=>openReport('profile',p.id,anchor,()=>openProfileMenu(anchor))});
+    }
+    openMenu(anchor,'',it);
+  }
+
+  // ---- open from a shared link:  /?post=<id>   /rooms?room=<id> ----
+  (function(){
+    try{
+      const q=new URLSearchParams(location.search),pid=q.get('post'),rid=q.get('room');
+      if(pid&&/^[0-9a-f-]{36}$/.test(pid)){history.replaceState(null,'',location.pathname);setTimeout(()=>openPostById(pid,'top'),400)}
+      else if(rid&&curPage==='rooms'){history.replaceState(null,'','/rooms');loadAllRooms().then(()=>{if(ROOMS.some(r=>r.id===rid))openRoom(rid);else showToast('That room is no longer available')}).catch(()=>{})}
+    }catch(e){}
+  })();
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    if(am.classList.contains('open')){closeMenu();return}
+    if(cfSheet.classList.contains('open')){cfClose(false);return}
+    if(xpSheet.classList.contains('open'))closeBSheet(xpSheet);
+  });
 
   // =====================================================================
   // SETTINGS + ACCOUNT (log out, password, delete)
@@ -2057,7 +2411,15 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#dlConfirm').addEventListener('input',e=>{$('#dlGo').disabled=e.target.value.trim()!=='DELETE'});
   $('#dlGo').addEventListener('click',()=>{
     const btn=$('#dlGo');btn.disabled=true;
-    rpc('delete_account').then(()=>signOut()).catch(()=>{$('#dlErr').textContent='Could not delete your account. Try again';btn.disabled=false});
+    // every photo you ever uploaded is deleted from storage first, then the account
+    (async()=>{
+      const urls=await rpc('my_photo_urls');
+      const all=[...new Set((urls||[]).concat(trashGet().map(x=>x.u)))];
+      const bad=await removePostImages(all);
+      if(bad.length){$('#dlErr').textContent='Could not remove your photos. Try again';btn.disabled=false;return}
+      trashSet([]);
+      await rpc('delete_account');signOut();
+    })().catch(()=>{$('#dlErr').textContent='Could not delete your account. Try again';btn.disabled=false});
   });
   [pwSheet,logoutSheet,deleteSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
   document.addEventListener('keydown',e=>{

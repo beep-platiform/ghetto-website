@@ -6,6 +6,7 @@ function extra(p: Post) {
   const o: Record<string, string> = {};
   if (p.photos.some(isUrl)) o['data-photos'] = JSON.stringify(p.photos);
   if (p.commentsOn === false) o['data-cm'] = '0';
+  if (p.saved) o['data-saved'] = '1';
   return o;
 }
 
@@ -133,6 +134,7 @@ function CompactPost({ p, i, meId }: { p: Post; i: number; meId: string }) {
               </div>
             </div>
             <LinkBtn on={p.author.linked} self={p.author.id === meId} />
+            <button className="more" aria-label="More"><i className="fa-solid fa-ellipsis-vertical"></i></button>
           </div>
           <div className="compact-title">{p.title}</div>
           <div className="compact-copy">{p.body}</div>

@@ -43,10 +43,13 @@ export async function uploadPostImage(blob: Blob, ext: string): Promise<string> 
   return sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-/** Remove photos you uploaded (best effort, used when you take a photo off an unsent post). */
-export async function removePostImages(urls: string[]) {
+/** Delete photos from the bucket. Returns the links that could NOT be deleted (so the caller can try again later). */
+export async function removePostImages(urls: string[]): Promise<string[]> {
   const marker = `/object/public/${BUCKET}/`;
-  const paths = urls.map(u => { const i = u.indexOf(marker); return i < 0 ? '' : decodeURIComponent(u.slice(i + marker.length).split('?')[0]); }).filter(Boolean);
-  if (!paths.length) return;
-  try { await supabase().storage.from(BUCKET).remove(paths); } catch {}
+  const pairs = urls.map(u => { const i = u.indexOf(marker); return { u, p: i < 0 ? '' : decodeURIComponent(u.slice(i + marker.length).split('?')[0]) }; }).filter(x => x.p);
+  if (!pairs.length) return [];
+  try {
+    const { error } = await supabase().storage.from(BUCKET).remove(pairs.map(x => x.p));
+    return error ? pairs.map(x => x.u) : [];
+  } catch { return pairs.map(x => x.u); }
 }

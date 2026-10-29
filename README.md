@@ -110,3 +110,14 @@ Notes
 - Run `0006_post_create.sql` and `0007_post_layout.sql` after 0005 (already applied to the `ghetto` project). A post with 2+ photos (or a room with a photo) uses the big card, otherwise the compact row.
 - "Linked only" posts are hidden from everyone who does not link with the author, and comments can be switched off per post (enforced in the database).
 - Note: photo files are public by link (like most social apps), but the links are random and cannot be listed.
+
+## Three-dot menus, deleting for real, square room cards
+
+- **One menu everywhere** (bottom sheet on phones, small popover on desktop). It is on: every post (feed, profile, open post), comments, notifications, room details and profiles.
+  - *My post*: Edit post (text, price, place, topics, who sees it, comments on/off, take photos off), Turn comments on/off, Copy link, Share, Delete.
+  - *Someone else's post*: Save / Remove from saved, Copy link, Share, Link / Unlink, Not interested (hides it from your feed), Report.
+  - *Comment*: Copy, Delete (your own, or any comment on your post), Report. *Notification*: Mark as read, Remove, Turn off that kind. *Room*: Copy link, Share, Report. *Profile*: Edit / Settings (yours), Copy link, Share, Link, Report.
+  - Saved posts are in **Profile → Saved** (with saved rooms). Shared links open directly: `/?post=<id>`, `/rooms?room=<id>`.
+- **Deleting removes the files too.** Deleting a post, taking a photo off a post while editing, removing a photo on the Create page, and deleting your account all delete the photo files from the `post-images` bucket (the browser does it with your own login; the database cannot remove storage files). If it fails (offline) the file is queued and retried the next time the app opens. Deleting the account first removes every photo you ever uploaded, and stops if that fails.
+- Run `0008_menus_storage.sql` after 0007 (already applied to the `ghetto` project): saved/hidden/reported tables, `toggle_saved_post`, `get_saved_posts`, `hide_post`, `report_content`, `delete_comment`, `delete_notifications`, `update_post`, `my_photo_urls`; `delete_post` now returns the photo links.
+- **Rooms** show 2 small square-cornered cards per row on phones and 4 on desktop.

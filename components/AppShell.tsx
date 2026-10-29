@@ -19,6 +19,8 @@ import ProfilePage from './ProfilePage';
 import ProfileSheets from './ProfileSheets';
 import SettingsPage from './SettingsPage';
 import SettingsSheets from './SettingsSheets';
+import ActionMenu from './ActionMenu';
+import PostSheets from './PostSheets';
 import type { AppData, Profile, Settings } from '../lib/types';
 
 /**
@@ -56,6 +58,8 @@ export default function AppShell({ page, data, profile, settings }: { page: 'hom
           <SearchSheet />
           <NotificationsSheet />
           <PostDetail />
+          <PostSheets />
+          <ActionMenu />
           <StoryViewer />
         </div>
 
