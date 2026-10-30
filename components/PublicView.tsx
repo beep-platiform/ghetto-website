@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { photoUrl } from '../lib/format';
-import { SITE, snippet, type PublicPost, type PublicRoom } from '../lib/public';
+import { SITE, snippet, type PublicPost, type PublicRoom, type PublicProduct } from '../lib/public';
 
 const TYPE: Record<string, string> = { room: 'Room', tip: 'Tip', price: 'Market price', question: 'Question', event: 'Event', single: 'Single room', shared: 'Shared room', house: 'House', apartment: 'Apartment' };
 const rwf = (n: number) => n.toLocaleString('en-US');
@@ -72,6 +72,36 @@ export function PublicRoomView({ room }: { room: PublicRoom }) {
           <dl className="pub-dl">{facts.map(([k, v]) => <div key={k} style={{ display: 'contents' }}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
           {room.fac.length > 0 && <div className="pub-tags">{room.fac.map((f) => <span key={f}>{f}</span>)}</div>}
           {room.about && <p style={{ marginTop: 16 }}>{room.about}</p>}
+          <Join />
+        </div>
+      </article>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
+    </div>
+  );
+}
+
+const COND: Record<string, string> = { new: 'New', like_new: 'Like new', used: 'Used', fair: 'Fair' };
+const CAT: Record<string, string> = { electronics: 'Electronics', furniture: 'Furniture', books: 'Books', clothes: 'Clothes', kitchen: 'Kitchen', transport: 'Transport', other: 'Other' };
+
+export function PublicProductView({ product }: { product: PublicProduct }) {
+  const ld = {
+    '@context': 'https://schema.org', '@type': 'Product', name: product.title, description: snippet(product.description, 300), url: `${SITE}/market/${product.id}`,
+    image: product.photos.filter((p) => /^https?:/.test(p)).slice(0, 4),
+    itemCondition: product.condition === 'new' ? 'https://schema.org/NewCondition' : 'https://schema.org/UsedCondition',
+    offers: { '@type': 'Offer', price: product.price, priceCurrency: 'RWF', availability: product.status === 'sold' ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock', url: `${SITE}/market/${product.id}` },
+  };
+  const facts: [string, string][] = [['Category', CAT[product.category] || product.category], ['Condition', COND[product.condition] || product.condition], ['Price', product.negotiable ? 'Negotiable' : 'Fixed'], ['Status', product.status === 'sold' ? 'Sold' : 'Available'], ['Seller', product.seller.name]];
+  return (
+    <div className="pub">
+      <Top />
+      <article className="pub-card">
+        {product.photos.length > 0 && <div className="pub-ph">{product.photos.slice(0, 6).map((p, i) => <img key={i} src={photoUrl(p, 'w=900&h=700')} alt={`${product.title} photo ${i + 1}`} loading={i ? 'lazy' : 'eager'} />)}</div>}
+        <div className="pub-in">
+          <h1>{product.title}</h1>
+          <div className="pub-by">{product.location || 'Kigali'}</div>
+          <div className="pub-price">{rwf(product.price)} RWF</div>
+          <dl className="pub-dl">{facts.map(([k, v]) => <div key={k} style={{ display: 'contents' }}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+          <p style={{ marginTop: 16 }}>{product.description}</p>
           <Join />
         </div>
       </article>

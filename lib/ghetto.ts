@@ -147,9 +147,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     history.pushState=function(){const r=ps.apply(null,arguments);lastPath=location.pathname;return r};
     history.replaceState=function(){const r=rs.apply(null,arguments);lastPath=location.pathname;return r};
   })();
-  const isOvPath=p=>/^\/(post\/|notifications$|search$)/.test(p)||/^\/rooms\/[^/]/.test(p);
+  const isOvPath=p=>/^\/(post\/|notifications$|search$)/.test(p)||/^\/(rooms|market)\/[^/]/.test(p);
   const ovPush=url=>{if(URLSYNC||location.pathname===url)return;try{history.pushState({ov:1},'',url)}catch(e){}};
-  const baseUrl=()=>curPage==='rooms'?'/rooms':curPage==='profile'?(curProfile?profPath(curProfile.handle):'/profile'):curPage==='settings'?'/settings':curPage==='create'?'/create':'/';
+  const baseUrl=()=>curPage==='rooms'?'/rooms':curPage==='market'?'/market':curPage==='profile'?(curProfile?profPath(curProfile.handle):'/profile'):curPage==='settings'?'/settings':curPage==='create'?'/create':'/';
   // close something that was opened on top: go Back if we pushed it, otherwise close it and fix the address
   function ovBack(close){
     if(history.state&&history.state.ov){history.back();return}
@@ -162,7 +162,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // nav
   $$('.nav-item').forEach(b=>b.addEventListener('click',()=>{
     const l=b.textContent.trim();
-    if(l==='Home'||l==='Rooms'){const pg=l.toLowerCase();setPage(pg);try{history.pushState(null,'',pg==='rooms'?'/rooms':'/')}catch(e){}}
+    if(l==='Home'||l==='Rooms'||l==='Market'){const pg=l.toLowerCase();setPage(pg);try{history.pushState(null,'',pg==='rooms'?'/rooms':pg==='market'?'/market':'/')}catch(e){}}
     else if(l==='Profile'){openProfile(ME.handle)}
     else showToast(l+' page coming soon 🚧');
   }));
@@ -831,7 +831,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // ===== DESKTOP: sidebar, right rail, story dismiss =====
   const NAVS=$$('.nav-item');
   function syncSide(){
-    ['home','rooms','community','profile'].forEach(pg=>{
+    ['home','rooms','market','profile'].forEach(pg=>{
       const nav=NAVS.find(n=>n.textContent.trim().toLowerCase()===pg),s=$('.s-item[data-page="'+pg+'"]');
       if(nav&&s)s.classList.toggle('active',nav.classList.contains('active'));
     });
@@ -1115,10 +1115,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     closeSheets();closeBSheet(filterSheet);closeBSheet(contactSheet);closeBSheet(editSheet);closeBSheet(linksSheet);closeBSheet(pwSheet);closeBSheet(logoutSheet);closeBSheet(deleteSheet);
     if(detail.classList.contains('open'))closePost();
     if(roomDetail.classList.contains('open'))closeRoom();
+    if(prodDetail.classList.contains('open'))closeProduct();
     $$('.nav-item').forEach(n=>n.classList.toggle('active',n.textContent.trim().toLowerCase()===pg));
     syncSide();
     const ss=$('.s-item[data-page="settings"]');if(ss)ss.classList.toggle('active',pg==='settings');
     if(pg==='rooms'){renderRooms(true);$('#rmScroll').scrollTop=0}
+    if(pg==='market')renderMarket();
     updateRail();
     if(pg==='home'&&feedRun)setTimeout(feedRun,80);
   }
@@ -1190,6 +1192,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function openContact(r){
     if(!r)return;
+    ctRoomMode();
     $('#csAv').src=FACE(r.ll.av);
     $('#csName').textContent='Message '+r.ll.name;
     $('#csRoom').textContent=r.title+' · '+rfmt(r.price)+' RWF';
@@ -1267,6 +1270,11 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#csSend').addEventListener('click',()=>{
     const msg=$('#csMsg').value.trim(),room=curRoom,btn=$('#csSend');
     if(!msg){showToast('Write a message first ✍️');return}
+    if(ctMode==='product'&&curProd){
+      const pr=curProd;btn.disabled=true;
+      rpc('send_product_message',{p_product:pr.id,p_body:msg}).then(()=>{showToast('Message sent to '+pr.seller.name+' 🎉');closeBSheet(contactSheet)}).catch(()=>fail('Message not sent')).finally(()=>{btn.disabled=false});
+      return;
+    }
     btn.disabled=true;
     rpc('send_room_message',{p_room:room.id,p_body:msg})
       .then(()=>{showToast('Message sent to '+room.ll.name+' 🎉');closeBSheet(contactSheet)})
@@ -1279,7 +1287,281 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(e.key!=='Escape')return;
     if(contactSheet.classList.contains('open')){closeBSheet(contactSheet);return}
     if(filterSheet.classList.contains('open')){closeBSheet(filterSheet);return}
+    if(prodDetail.classList.contains('open')&&!viewer.classList.contains('open')){ovBack(closeProduct);return}
     if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))ovBack(closeRoom);
+  });
+
+  // =====================================================================
+  // MARKETPLACE (/market, /market/<id>)  +  OWNER TOOLS FOR ROOMS AND PRODUCTS (edit, delete)
+  // Products load a page at a time, newest first. A seller can edit, mark as sold, or delete (photos are deleted too).
+  // =====================================================================
+  const MK={items:[],next:null,done:false,busy:false,started:false,cat:'all',q:'',mine:false,seq:0};
+  const DETPROD={};let curProd=null;
+  const prodDetail=$('#prodDetail'),mkGrid=$('#mkGrid'),mkScroll=$('#mkScroll');
+  const condLabel=c=>(PD_COND.find(x=>x[0]===c)||[0,'Used'])[1];
+  const catOf=c=>PD_CATS.find(x=>x[0]===c)||PD_CATS[PD_CATS.length-1];
+  const agoTxt=a=>a==='Just now'?a:a+' ago';
+  function prodCardHTML(p,i){
+    const sold=p.status==='sold',cat=catOf(p.category);
+    return '<article class="rcard pcard'+(sold?' sold':'')+'" data-prod="'+p.id+'" style="--i:'+i+'">'+
+      '<div class="rc-media">'+(p.photos[0]?'<img src="'+rimg(p.photos[0],480,480)+'" alt="'+esc(p.title)+'" loading="lazy" onerror="this.remove()">':'')+
+      '<div class="rc-top">'+(sold?'<span class="pill sold">Sold</span>':'<span class="pill pcat"><i class="fa-solid '+cat[2]+'"></i>'+cat[1]+'</span>')+'</div></div>'+
+      '<div class="rc-body"><div class="rc-line"><div class="rc-price"><b>'+rfmt(p.price)+'</b><small>RWF</small></div>'+(p.negotiable?'<span class="rc-neg">Negotiable</span>':'')+'</div>'+
+      '<h3 class="rc-title">'+esc(p.title)+'</h3>'+
+      '<div class="rc-loc"><i class="fa-solid fa-location-dot"></i>'+esc(p.location||'Kigali')+' · '+condLabel(p.condition)+'</div></div></article>';
+  }
+  function paintMkChips(){
+    const all=[['all','All','fa-border-all']].concat(PD_CATS.map(c=>[c[0],c[1],c[2]]));
+    $('#mkChips').innerHTML=all.map(c=>'<button type="button" class="rm-chip'+(!MK.mine&&MK.cat===c[0]?' on':'')+'" data-mk="'+c[0]+'"><i class="fa-solid '+c[2]+'"></i>'+c[1]+'</button>').join('')+
+      '<button type="button" class="rm-chip'+(MK.mine?' on':'')+'" data-mk="mine"><i class="fa-solid fa-store"></i>My products</button>';
+  }
+  function paintMkMore(){
+    $('#mkMore').hidden=!(MK.busy||(MK.started&&!MK.done));
+    $('#mkEnd').hidden=!(MK.done&&MK.items.length>0);
+    const em=$('#mkEmpty');em.hidden=!(MK.done&&!MK.items.length&&!MK.busy);
+    if(!em.hidden){
+      $('#mkEmptyT').textContent=MK.mine?'You have not listed anything':MK.q?'No products match “'+MK.q+'”':'Nothing here yet';
+      $('#mkEmptyP').textContent=MK.mine?'Sell something you no longer need.':MK.q?'Try another word or category.':'Be the first to sell something.';
+    }
+  }
+  function loadProducts(reset){
+    if(reset){MK.items=[];MK.next=null;MK.done=false;MK.busy=false;MK.seq++;mkGrid.innerHTML=''}
+    if(MK.busy||MK.done)return Promise.resolve();
+    MK.busy=true;MK.started=true;paintMkMore();
+    const seq=MK.seq,cur=MK.next;
+    return rpc('get_products',{p_limit:8,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null,p_category:MK.cat==='all'?null:MK.cat,p_query:MK.q||null,p_mine:MK.mine}).then(r=>{
+      if(seq!==MK.seq)return;
+      const fresh=r.products.filter(x=>!MK.items.some(y=>y.id===x.id));
+      MK.items.push(...fresh);MK.next=r.next||null;MK.done=!r.next;
+      fresh.forEach(p=>{PNAME[p.seller.id]=p.seller.name;HANDLES[p.seller.id]=p.seller.handle});
+      mkGrid.insertAdjacentHTML('beforeend',fresh.map((p,i)=>prodCardHTML(p,i)).join(''));
+    }).catch(()=>{if(seq===MK.seq){MK.done=true;fail('Could not load the marketplace')}}).finally(()=>{if(seq===MK.seq){MK.busy=false;paintMkMore()}});
+  }
+  function renderMarket(){
+    paintMkChips();
+    if(!MK.started)loadProducts(true);else paintMkMore();
+    mkScroll.scrollTop=0;
+  }
+  const mkRun=infinite($('#mkMore'),mkScroll,()=>curPage==='market'&&MK.started&&!MK.done&&!MK.busy,()=>loadProducts());
+  let mkTimer=0;
+  $('#mkSearch').addEventListener('input',e=>{clearTimeout(mkTimer);const v=e.target.value.trim();mkTimer=setTimeout(()=>{if(v!==MK.q){MK.q=v;loadProducts(true)}},300)});
+  $('#mkSell').addEventListener('click',()=>openCreate('product'));
+  $('#mkEmptyBtn').addEventListener('click',()=>openCreate('product'));
+  $('#marketPage').addEventListener('click',e=>{
+    const ch=e.target.closest('[data-mk]');
+    if(ch){const v=ch.dataset.mk;if(v==='mine'){MK.mine=!MK.mine;MK.cat='all'}else{MK.mine=false;MK.cat=v}paintMkChips();loadProducts(true);return}
+    const c=e.target.closest('[data-prod]');if(c)openProduct(c.dataset.prod);
+  });
+
+  // ---- product page ----
+  function buildProduct(p){
+    const sold=p.status==='sold',cat=catOf(p.category),s=p.seller;
+    const gal='<div class="rd-gal-wrap"><div class="rd-gal" id="pdGal">'+p.photos.map(u=>'<div class="g-slide"><img src="'+rimg(u,1000,800)+'" alt="'+esc(p.title)+'" onerror="this.remove()"></div>').join('')+'</div>'+
+      (sold?'<span class="rd-avail"><span class="pill sold">Sold</span></span>':'')+'<span class="g-count" id="pdCount">1/'+p.photos.length+'</span>'+
+      (p.photos.length>1?'<button class="g-nav prev" data-pg="p" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button class="g-nav next" data-pg="n" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button>':'')+'</div>';
+    const facts=[['Category',cat[1]],['Condition',condLabel(p.condition)],['Posted',agoTxt(p.ago)],['Status',sold?'Sold':'Available']];
+    $('#pdBody').innerHTML=gal+'<div class="rd-pad">'+
+      '<div class="rd-tags"><span class="tag">'+cat[1]+'</span><span class="tag green">'+condLabel(p.condition)+'</span></div>'+
+      '<h1 class="rd-title">'+esc(p.title)+'</h1>'+
+      '<div class="rd-price"><b>'+rfmt(p.price)+' RWF</b><small>'+(p.negotiable?'Negotiable':'Fixed price')+'</small></div>'+
+      '<div class="pd-loc"><i class="fa-solid fa-location-dot"></i>'+esc(p.location||'Kigali')+'</div>'+
+      '<h3 class="rd-h">Description</h3><p class="rd-about">'+esc(p.description)+'</p>'+
+      '<div class="rd-facts">'+facts.map(f=>'<div class="fact"><small>'+f[0]+'</small><b>'+esc(String(f[1]))+'</b></div>').join('')+'</div>'+
+      '<div class="rd-ll"><div class="avatar"><img src="'+FACE(s.avatar)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(s.name)+(s.verified?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>'+esc(s.role)+(p.mine?' · You':'')+'</small></div>'+
+        (p.mine?'':'<button class="btn-ghost rd-msg" data-pd="profile">Profile</button>')+'</div>'+
+      '<p class="rr-note pd-safe"><i class="fa-solid fa-shield-halved"></i>Meet in a public place and check the item before you pay. Never send money in advance.</p></div>';
+    $('#pdTitleTop').textContent=p.title;
+    $('#pdCta').innerHTML='<div class="rd-cta-price"><b>'+rfmt(p.price)+' RWF</b><small>'+(p.negotiable?'Negotiable':'Fixed price')+'</small></div>'+
+      (p.mine?'<button class="rd-contact" data-pd="sold"><i class="fa-solid '+(sold?'fa-rotate-left':'fa-circle-check')+'"></i>'+(sold?'Mark as available':'Mark as sold')+'</button>'
+        :'<button class="rd-contact" data-pd="msg"'+(sold?' disabled':'')+'><i class="fa-regular fa-comment-dots"></i>'+(sold?'Sold':'Message seller')+'</button>');
+    const g=$('#pdGal');
+    if(g&&p.photos.length>1)g.addEventListener('scroll',()=>{const k=Math.round(g.scrollLeft/g.clientWidth);$('#pdCount').textContent=(k+1)+'/'+p.photos.length},{passive:true});
+  }
+  function openProduct(id,noPush){
+    const p=MK.items.find(x=>x.id===id)||DETPROD[id];
+    if(!p){openProductById(id,noPush);return}
+    curProd=p;buildProduct(p);
+    prodDetail.classList.add('open');prodDetail.setAttribute('aria-hidden','false');
+    $('#pdScroll').scrollTop=0;
+    if(!noPush)ovPush('/market/'+id);
+  }
+  function openProductById(id,noPush){
+    if(MK.items.some(x=>x.id===id)||DETPROD[id]){openProduct(id,noPush);return}
+    rpc('get_product',{p_product:id}).then(p=>{
+      if(!p){showToast('That product is no longer available');ovMissing();return}
+      DETPROD[id]=p;PNAME[p.seller.id]=p.seller.name;HANDLES[p.seller.id]=p.seller.handle;openProduct(id,noPush);
+    }).catch(()=>{fail('Could not open that product');ovMissing()});
+  }
+  function closeProduct(){prodDetail.classList.remove('open');prodDetail.setAttribute('aria-hidden','true');closeBSheet(contactSheet)}
+  function setProduct(p){
+    DETPROD[p.id]=p;
+    const i=MK.items.findIndex(x=>x.id===p.id);if(i>-1)MK.items[i]=p;
+    const el=$('[data-prod="'+p.id+'"]',mkGrid);if(el){const t=document.createElement('div');t.innerHTML=prodCardHTML(p,0);t.firstChild.classList.add('na');el.replaceWith(t.firstChild)}
+    if(curProd&&curProd.id===p.id){curProd=p;buildProduct(p)}
+  }
+  $('#pdBack').addEventListener('click',()=>ovBack(closeProduct));
+  $('#pdShare').addEventListener('click',()=>{if(curProd)(navigator.share?shareLink:copyText)(location.origin+'/market/'+curProd.id,curProd.title)});
+  $('#pdBody').addEventListener('click',e=>{
+    const n=e.target.closest('.g-nav');
+    if(n){const g=$('#pdGal');g.scrollBy({left:(n.dataset.pg==='n'?1:-1)*g.clientWidth,behavior:'smooth'});return}
+    if(e.target.closest('[data-pd=profile]')&&curProd){const h=curProd.seller.handle;ovBack(closeProduct);setTimeout(()=>openProfile(h),50)}
+  });
+  $('#pdCta').addEventListener('click',e=>{
+    const b=e.target.closest('[data-pd]');if(!b||!curProd)return;
+    if(b.dataset.pd==='msg')openContactProduct(curProd);
+    else if(b.dataset.pd==='sold')toggleSold(curProd);
+  });
+  function toggleSold(p){
+    const sold=p.status!=='sold';
+    rpc('set_product_sold',{p_product:p.id,p_sold:sold}).then(r=>{setProduct(r);showToast(sold?'Marked as sold ✅':'Back on sale 🛍️')}).catch(()=>fail('Could not change that'));
+  }
+  async function deleteProduct(p){
+    const ok=await confirmBox({title:'Delete this product?',text:'The listing and all its photos will be deleted for good.',ok:'Delete product'});
+    if(!ok)return;
+    try{
+      const r=await rpc('delete_product',{p_product:p.id});
+      MK.items=MK.items.filter(x=>x.id!==p.id);delete DETPROD[p.id];
+      const el=$('[data-prod="'+p.id+'"]',mkGrid);if(el)el.remove();
+      if(prodDetail.classList.contains('open'))ovBack(closeProduct);
+      paintMkMore();showToast('Product deleted 🗑️');
+      purgePhotos(r&&r.photos).catch(()=>{});
+    }catch(e){fail('Could not delete that product')}
+  }
+  function openProductMenu(anchor){
+    const p=curProd;if(!p)return;
+    const link=location.origin+'/market/'+p.id,it=[];
+    if(p.mine){
+      it.push({icon:'fa-pen',t:'Edit product',fn:()=>openEditProduct(p)});
+      it.push({icon:p.status==='sold'?'fa-rotate-left':'fa-circle-check',t:p.status==='sold'?'Mark as available':'Mark as sold',fn:()=>toggleSold(p)});
+    }
+    it.push({icon:'fa-link',t:'Copy link',fn:()=>copyText(link,'Product link copied 🔗')});
+    if(canShare)it.push({icon:'fa-share-nodes',t:'Share…',fn:()=>shareLink(link,p.title)});
+    if(p.mine)it.push({icon:'fa-trash',t:'Delete product',s:'Also deletes its photos',danger:true,fn:()=>deleteProduct(p)});
+    else{
+      it.push({icon:'fa-user',t:'View seller',fn:()=>{const h=p.seller.handle;ovBack(closeProduct);setTimeout(()=>openProfile(h),50)}});
+      it.push({icon:'fa-flag',t:'Report product',danger:true,fn:()=>openReport('product',p.id,anchor,()=>openProductMenu(anchor))});
+    }
+    openMenu(anchor,'',it);
+  }
+  $('#pdMore').addEventListener('click',e=>openProductMenu(e.currentTarget));
+
+  // ---- message the seller (the same sheet as "Contact landlord") ----
+  let ctMode='room';
+  const CT_QUICK=$('.cs-quick').innerHTML,CT_SAFE=$('.cs-safe').innerHTML;
+  function ctRoomMode(){
+    ctMode='room';$('.cs-quick').innerHTML=CT_QUICK;$('.cs-alt',contactSheet).style.display='';$('.cs-safe').innerHTML=CT_SAFE;
+    contactSheet.setAttribute('aria-label','Contact landlord');
+  }
+  function openContactProduct(p){
+    ctMode='product';
+    $('#csAv').src=FACE(p.seller.avatar);$('#csName').textContent='Message '+p.seller.name;
+    $('#csRoom').textContent=p.title+' · '+rfmt(p.price)+' RWF';
+    $('#csMsg').value='Hi '+p.seller.name.split(' ')[0]+', is this still available?';
+    $('.cs-quick').innerHTML='<button type="button" data-m="Hi, is this still available?">Still available?</button><button type="button" data-m="Can we meet today?">Meet today</button><button type="button" data-m="Is the price negotiable?">Price negotiable?</button>';
+    $('.cs-alt',contactSheet).style.display='none';
+    $('.cs-safe').innerHTML='<i class="fa-solid fa-shield-halved"></i>Meet in a public place and check the item before you pay.';
+    contactSheet.setAttribute('aria-label','Message seller');
+    openBSheet(contactSheet);
+  }
+
+  // ---- shared bits of the edit sheets ----
+  function epPhotos(st,box,note){
+    box.innerHTML=st.photos.map((u,i)=>'<div class="cr-ph"><img alt="" src="'+esc(u)+'"><button type="button" class="cr-rm" data-prm="'+i+'" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button></div>').join('');
+    note.textContent=st.removed.length?st.removed.length+(st.removed.length===1?' photo':' photos')+' will be deleted from storage when you save.':'Taking a photo off deletes the file for good. Keep at least one.';
+  }
+  function epDropPhoto(st,i,box,note){
+    if(st.photos.length<=1){showToast('Keep at least one photo 📷');return}
+    const [u]=st.photos.splice(i,1);st.removed.push(u);epPhotos(st,box,note);
+  }
+  const epErr=e=>{const m=String((e&&e.message)||'');return m&&m.length<90?m:'Could not save. Try again'};
+  const numOnly=v=>String(v).replace(/\D/g,'').slice(0,9);
+
+  // ---- edit a room (landlord) ----
+  const xrSheet=$('#xrSheet');let XR=null;
+  function xrPaintGroups(){
+    const set=(g,h)=>{const el=$('[data-xg="'+g+'"]',xrSheet);if(el)el.innerHTML=h};
+    set('rtype',chips('rtype',RM_TYPES,XR.type));set('bath',chips('bath',RM_BATH.map(x=>[x,x]),XR.bath));
+    set('dep',chips('dep',RM_DEP.map(x=>[x,x]),XR.dep));set('min',chips('min',RM_MIN.map(x=>[x,x]),XR.min));
+    set('fac',chips('fac',Object.keys(RFAC).map(k=>[k,RFAC[k][0],RFAC[k][1]]),XR.fac,true));
+  }
+  function openEditRoom(r){
+    if(!r||r.ll.id!==ME.id)return;
+    XR={id:r.id,photos:r.photos.filter(isU),removed:[],type:r.type,bath:r.bath,dep:RM_DEP.indexOf(r.dep)>-1?r.dep:'1 month',min:RM_MIN.indexOf(r.min)>-1?r.min:'3 months',fac:r.fac.slice()};
+    $('#xrTitle').value=r.title;$('#xrArea').value=r.area;$('#xrPrice').value=rfmt(r.price);$('#xrKm').value=r.km;$('#xrBeds').value=r.beds;
+    $('#xrFrom').value=r.from<TODAY?TODAY:r.from;$('#xrAbout').value=r.about;$('#xrAboutN').textContent=r.about.length+'/2000';$('#xrErr').textContent='';$('#xrSave').disabled=false;
+    xrPaintGroups();epPhotos(XR,$('#xrPhotos'),$('#xrPhNote'));openBSheet(xrSheet);
+  }
+  xrSheet.addEventListener('click',e=>{
+    if(e.target.closest('.bs-back,.bs-close')){closeBSheet(xrSheet);return}
+    const rm=e.target.closest('[data-prm]');if(rm){epDropPhoto(XR,+rm.dataset.prm,$('#xrPhotos'),$('#xrPhNote'));return}
+    const gv=e.target.closest('[data-gv]');if(!gv)return;
+    const g=gv.closest('[data-xg]').dataset.xg,v=gv.dataset.gv;
+    if(g==='rtype')XR.type=v;else if(g==='bath')XR.bath=v;else if(g==='dep')XR.dep=v;else if(g==='min')XR.min=v;
+    else if(g==='fac'){const i=XR.fac.indexOf(v);if(i>-1)XR.fac.splice(i,1);else XR.fac.push(v)}
+    xrPaintGroups();
+  });
+  $('#xrAbout').addEventListener('input',e=>{$('#xrAboutN').textContent=e.target.value.length+'/2000'});
+  $('#xrPrice').addEventListener('input',e=>{const d=numOnly(e.target.value);e.target.value=d?crFmt(d):''});
+  $('#xrSave').addEventListener('click',async()=>{
+    if(!XR)return;const btn=$('#xrSave'),err=$('#xrErr');err.textContent='';btn.disabled=true;
+    try{
+      const res=await rpc('update_room',{p_room:XR.id,p_title:$('#xrTitle').value,p_type:XR.type,p_area:$('#xrArea').value,p_km:+$('#xrKm').value,p_price:+($('#xrPrice').value.replace(/\D/g,'')||0),
+        p_beds:+$('#xrBeds').value,p_bath:XR.bath,p_fac:XR.fac,p_from:$('#xrFrom').value,p_deposit:XR.dep,p_min:XR.min,p_about:$('#xrAbout').value,p_photos:XR.photos});
+      const i=ROOMS.findIndex(x=>x.id===XR.id);if(i>-1)ROOMS[i]=res.room;else DETROOM[XR.id]=res.room;
+      closeBSheet(xrSheet);
+      if(curPage==='rooms')renderRooms(true);
+      if(roomDetail.classList.contains('open')&&curRoom&&curRoom.id===res.room.id){curRoom=res.room;buildRoom(res.room)}
+      showToast('Room updated ✅');purgePhotos(res.removed).catch(()=>{});XR=null;
+    }catch(e){err.textContent=epErr(e);btn.disabled=false}
+  });
+  async function deleteRoom(r){
+    const ok=await confirmBox({title:'Delete this room?',text:'The listing and all its photos will be deleted for good.',ok:'Delete room'});
+    if(!ok)return;
+    try{
+      const d=await rpc('delete_room',{p_room:r.id});
+      const i=ROOMS.findIndex(x=>x.id===r.id);if(i>-1)ROOMS.splice(i,1);delete DETROOM[r.id];saved.delete(r.id);
+      if(roomDetail.classList.contains('open'))ovBack(closeRoom);
+      if(curPage==='rooms')renderRooms(true);
+      if(curPage==='profile'&&pfTab!=='posts')renderPfList();
+      showToast('Room deleted 🗑️');purgePhotos(d&&d.photos).catch(()=>{});
+    }catch(e){fail('Could not delete that room')}
+  }
+
+  // ---- edit a product (seller) ----
+  const xqSheet=$('#xqSheet');let XQ=null;
+  function xqPaint(){
+    const set=(g,h)=>{const el=$('[data-xg="'+g+'"]',xqSheet);if(el)el.innerHTML=h};
+    set('cat',chips('cat',PD_CATS,XQ.cat));set('cond',chips('cond',PD_COND.map(x=>[x[0],x[1]]),XQ.cond));
+    const sw=$('#xqNeg');sw.classList.toggle('on',XQ.neg);sw.setAttribute('aria-checked',String(XQ.neg));
+  }
+  function openEditProduct(p){
+    if(!p||!p.mine)return;
+    XQ={id:p.id,photos:p.photos.filter(isU),removed:[],cat:p.category,cond:p.condition,neg:!!p.negotiable};
+    $('#xqTitle').value=p.title;$('#xqPrice').value=rfmt(p.price);$('#xqLoc').value=p.location||'';$('#xqDesc').value=p.description;$('#xqDescN').textContent=p.description.length+'/2000';
+    $('#xqErr').textContent='';$('#xqSave').disabled=false;xqPaint();epPhotos(XQ,$('#xqPhotos'),$('#xqPhNote'));openBSheet(xqSheet);
+  }
+  xqSheet.addEventListener('click',e=>{
+    if(e.target.closest('.bs-back,.bs-close')){closeBSheet(xqSheet);return}
+    const rm=e.target.closest('[data-prm]');if(rm){epDropPhoto(XQ,+rm.dataset.prm,$('#xqPhotos'),$('#xqPhNote'));return}
+    if(e.target.closest('#xqNeg')){XQ.neg=!XQ.neg;xqPaint();return}
+    const gv=e.target.closest('[data-gv]');if(!gv)return;
+    const g=gv.closest('[data-xg]').dataset.xg;if(g==='cat')XQ.cat=gv.dataset.gv;else if(g==='cond')XQ.cond=gv.dataset.gv;
+    xqPaint();
+  });
+  $('#xqDesc').addEventListener('input',e=>{$('#xqDescN').textContent=e.target.value.length+'/2000'});
+  $('#xqPrice').addEventListener('input',e=>{const d=numOnly(e.target.value);e.target.value=d?crFmt(d):''});
+  $('#xqSave').addEventListener('click',async()=>{
+    if(!XQ)return;const btn=$('#xqSave'),err=$('#xqErr');err.textContent='';btn.disabled=true;
+    try{
+      const res=await rpc('update_product',{p_product:XQ.id,p_title:$('#xqTitle').value,p_category:XQ.cat,p_condition:XQ.cond,p_price:+($('#xqPrice').value.replace(/\D/g,'')||0),
+        p_negotiable:XQ.neg,p_description:$('#xqDesc').value,p_location:$('#xqLoc').value.trim()||null,p_photos:XQ.photos});
+      closeBSheet(xqSheet);setProduct(res.product);showToast('Product updated ✅');purgePhotos(res.removed).catch(()=>{});XQ=null;
+    }catch(e){err.textContent=epErr(e);btn.disabled=false}
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    if(xrSheet.classList.contains('open'))closeBSheet(xrSheet);
+    else if(xqSheet.classList.contains('open'))closeBSheet(xqSheet);
   });
 
   // ---- new post: see CREATE A POST below ----
@@ -1652,7 +1934,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   })});
 
   // browser back / forward and deep links
-  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':location.pathname.indexOf('/create')===0?'create':'home';
+  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':location.pathname.indexOf('/market')===0?'market':location.pathname.indexOf('/create')===0?'create':'home';
   // what is open on top, according to the address
   function syncOverlays(){
     URLSYNC=true;
@@ -1663,6 +1945,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       else if(detail.classList.contains('open'))closePost();
       if(rid){if(!(roomDetail.classList.contains('open')&&curRoom&&curRoom.id===rid))openRoomById(rid,true)}
       else if(roomDetail.classList.contains('open'))closeRoom();
+      const m3=p.match(/^\/market\/([0-9a-f-]{36})$/),mid=m3&&m3[1];
+      if(mid){if(!(prodDetail.classList.contains('open')&&curProd&&curProd.id===mid))openProductById(mid,true)}
+      else if(prodDetail.classList.contains('open'))closeProduct();
       if(p==='/notifications'){if(!sNotif.classList.contains('open'))openNotifs()}
       else if(sNotif.classList.contains('open'))closeSheets();
       if(p==='/search'){if(!sSearch.classList.contains('open'))openSearch()}
@@ -1696,7 +1981,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // so an abandoned draft never leaves files behind. Text is kept as a draft in this browser.
   // =====================================================================
   const CR_TYPES=[
-    {id:'room',label:'Room',icon:'fa-bed',tph:'e.g. Single room with own bathroom',bph:'What is included, the rules, the deposit and how to visit.',price:'Monthly rent',phint:'Shown on the photo',need:true},
+    {id:'room',label:'About a room',icon:'fa-bed',tph:'e.g. Single room with own bathroom',bph:'What is included, the rules, the deposit and how to visit.',price:'Monthly rent',phint:'Shown on the photo',need:true},
     {id:'tip',label:'Tip',icon:'fa-lightbulb',tph:'e.g. How I save on transport to campus',bph:'Share what worked for you, step by step.'},
     {id:'price',label:'Market price',icon:'fa-tag',tph:'e.g. Rice 1 kg at Nyabugogo market',bph:'Where did you see it? Is it cheap, normal or expensive?',price:'Price you saw',phint:'Helps others compare',need:true},
     {id:'question',label:'Question',icon:'fa-circle-question',tph:'e.g. Where can I find a quiet place to study?',bph:'Add a little detail so people can answer well.'},
@@ -1704,11 +1989,17 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   ];
   const CR_TAGS={room:['singleroom','sharedroom','deposit','wifi','nearcampus'],tip:['studytips','budget','transport','food','wifi'],price:['food','transport','market','rent','cheap'],question:['help','rooms','study','safety','transport'],event:['campus','study','meetup','free','weekend']};
   const CR_AUD={everyone:['fa-earth-africa','Everyone','Everyone on Ghetto'],links:['fa-user-group','Linked','Only people you link with']};
-  const CR_MAX=6,CRK='ghetto.draft.'+ME.id;
-  const crNew=()=>({type:'tip',title:'',body:'',price:'',loc:'',tags:[],aud:'everyone',cm:true,alt:'',photos:[]});
+  let CR_MAX=6;const CRK='ghetto.draft.'+ME.id,CR_MAXES={post:6,room:8,product:6};
+  const isLandlord=()=>ME.role==='Landlord';
+  const RM_TYPES=[['single','Single room','fa-bed'],['shared','Shared room','fa-user-group'],['house','House','fa-house'],['apartment','Apartment','fa-building']];
+  const RM_BATH=['Private','Shared'],RM_DEP=['None','1 month','2 months','3 months'],RM_MIN=['1 month','3 months','6 months','12 months'];
+  const PD_CATS=[['electronics','Electronics','fa-laptop'],['furniture','Furniture','fa-couch'],['books','Books','fa-book'],['clothes','Clothes','fa-shirt'],['kitchen','Kitchen','fa-utensils'],['transport','Transport','fa-bicycle'],['other','Other','fa-box']];
+  const PD_COND=[['new','New'],['like_new','Like new'],['used','Used'],['fair','Fair']];
+  const crNew=()=>({kind:'post',type:'tip',title:'',body:'',price:'',loc:'',tags:[],aud:'everyone',cm:true,alt:'',photos:[],
+    rm:{type:'single',beds:'1',bath:'Private',km:'',from:TODAY,dep:'1 month',min:'3 months',fac:[]},pd:{cat:'other',cond:'used',neg:false}});
   let CR=crNew(),crPosting=false,crTileN=0,crSavedTimer=0,crPrevTimer=0,crDraftTimer=0,crReady=false;
   const crType=()=>CR_TYPES.find(t=>t.id===CR.type)||CR_TYPES[1];
-  const crHasText=()=>!!(CR.title.trim()||CR.body.trim()||CR.price||CR.loc.trim()||CR.tags.length||CR.alt.trim());
+  const crHasText=()=>!!(CR.title.trim()||CR.body.trim()||CR.price||CR.loc.trim()||CR.tags.length||CR.alt.trim()||CR.rm.km);
   const crFmt=n=>(+n).toLocaleString('en-US');
 
   function crSaveDraft(){
@@ -1716,7 +2007,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     crDraftTimer=setTimeout(()=>{
       try{
         if(!crHasText()){localStorage.removeItem(CRK);return}
-        localStorage.setItem(CRK,JSON.stringify({type:CR.type,title:CR.title,body:CR.body,price:CR.price,loc:CR.loc,tags:CR.tags,aud:CR.aud,cm:CR.cm,alt:CR.alt}));
+        localStorage.setItem(CRK,JSON.stringify({kind:CR.kind,rm:CR.rm,pd:CR.pd,type:CR.type,title:CR.title,body:CR.body,price:CR.price,loc:CR.loc,tags:CR.tags,aud:CR.aud,cm:CR.cm,alt:CR.alt}));
         const s=$('#crSaved');if(s){s.textContent='Draft saved';s.classList.add('show');clearTimeout(crSavedTimer);crSavedTimer=setTimeout(()=>s.classList.remove('show'),1600)}
       }catch(e){}
     },700);
@@ -1725,7 +2016,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     try{
       const d=JSON.parse(localStorage.getItem(CRK)||'null');
       if(!d||typeof d!=='object')return null;
-      return {type:CR_TYPES.some(t=>t.id===d.type)?d.type:'tip',title:String(d.title||'').slice(0,140),body:String(d.body||'').slice(0,2000),price:String(d.price||'').replace(/\D/g,'').slice(0,9),
+      const r0=d.rm||{},p0=d.pd||{},dflt=crNew();
+      const kind=d.kind==='product'?'product':(d.kind==='room'&&isLandlord()?'room':'post');
+      const rm={type:RM_TYPES.some(x=>x[0]===r0.type)?r0.type:'single',beds:String(r0.beds||'1').replace(/\D/g,'').slice(0,2)||'1',bath:RM_BATH.indexOf(r0.bath)>-1?r0.bath:'Private',
+        km:String(r0.km||'').replace(/[^0-9.]/g,'').slice(0,5),from:/^\d{4}-\d{2}-\d{2}$/.test(r0.from||'')?r0.from:dflt.rm.from,dep:RM_DEP.indexOf(r0.dep)>-1?r0.dep:'1 month',
+        min:RM_MIN.indexOf(r0.min)>-1?r0.min:'3 months',fac:Array.isArray(r0.fac)?r0.fac.filter(f=>RFAC[f]):[]};
+      const pd={cat:PD_CATS.some(x=>x[0]===p0.cat)?p0.cat:'other',cond:PD_COND.some(x=>x[0]===p0.cond)?p0.cond:'used',neg:p0.neg===true};
+      return {kind:kind,rm:rm,pd:pd,type:CR_TYPES.some(t=>t.id===d.type)?d.type:'tip',title:String(d.title||'').slice(0,140),body:String(d.body||'').slice(0,2000),price:String(d.price||'').replace(/\D/g,'').slice(0,9),
         loc:String(d.loc||'').slice(0,60),tags:Array.isArray(d.tags)?d.tags.map(String).slice(0,5):[],aud:d.aud==='links'?'links':'everyone',cm:d.cm!==false,alt:String(d.alt||'').slice(0,200)};
     }catch(e){return null}
   }
@@ -1738,6 +2035,51 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     $('#crTitle').placeholder=t.tph;$('#crBody').placeholder=t.bph;
     $('#crPriceBox').hidden=!t.price;
     if(t.price){$('label[for=crPrice]').textContent=t.price;$('#crPriceHint').textContent=t.phint}
+  }
+  const KIND_DEF={post:['fa-pen','Post','Shown in the feed'],room:['fa-bed','Room','Listed in Rooms, so students can find it'],product:['fa-bag-shopping','Product','Listed in the Marketplace']};
+  const crLabel=()=>CR.kind==='room'?'List room':CR.kind==='product'?'List product':'Post';
+  function crPaintKinds(){
+    $('#crKinds').innerHTML=['post','room','product'].map(k=>{
+      const lock=k==='room'&&!isLandlord();
+      return '<button type="button" role="radio" class="cr-kind'+(CR.kind===k?' on':'')+(lock?' locked':'')+'" data-kind="'+k+'" aria-checked="'+(CR.kind===k)+'"><i class="fa-solid '+KIND_DEF[k][0]+'"></i>'+KIND_DEF[k][1]+(lock?'<em class="fa-solid fa-lock"></em>':'')+'</button>'}).join('');
+    const n=$('#crKindNote');
+    n.hidden=false;
+    n.textContent=CR.kind==='post'&&!isLandlord()?'Shown in the feed. Room listings are for landlords. You can still write a post about a room.':KIND_DEF[CR.kind][2];
+  }
+  function chips(g,list,cur,multi){
+    return list.map(x=>{const on=multi?cur.indexOf(x[0])>-1:cur===x[0];
+      return '<button type="button" class="cr-chip big'+(on?' on':'')+'" data-gv="'+x[0]+'" aria-pressed="'+on+'">'+(x[2]?'<i class="fa-solid '+x[2]+'"></i>':'')+esc(x[1])+'</button>'}).join('');
+  }
+  function crPaintGroups(){
+    const set=(g,h)=>{const el=$('[data-g="'+g+'"]');if(el)el.innerHTML=h};
+    set('rtype',chips('rtype',RM_TYPES,CR.rm.type));
+    set('bath',chips('bath',RM_BATH.map(x=>[x,x]),CR.rm.bath));
+    set('dep',chips('dep',RM_DEP.map(x=>[x,x]),CR.rm.dep));
+    set('min',chips('min',RM_MIN.map(x=>[x,x]),CR.rm.min));
+    set('fac',chips('fac',Object.keys(RFAC).map(k=>[k,RFAC[k][0],RFAC[k][1]]),CR.rm.fac,true));
+    set('cat',chips('cat',PD_CATS,CR.pd.cat));
+    set('cond',chips('cond',PD_COND.map(x=>[x[0],x[1]]),CR.pd.cond));
+    const sw=$('#crNeg');sw.classList.toggle('on',CR.pd.neg);sw.setAttribute('aria-checked',String(CR.pd.neg));
+  }
+  function crPaintKindUI(){
+    const k=CR.kind;CR_MAX=CR_MAXES[k];
+    $$('.cr-post-only').forEach(e=>e.hidden=k!=='post');
+    $$('.cr-room-only').forEach(e=>e.hidden=k!=='room');
+    $$('.cr-prod-only').forEach(e=>e.hidden=k!=='product');
+    $('#crHeadTitle').textContent=k==='room'?'List a room':k==='product'?'Sell a product':'New post';
+    $('#crBodyLabel').textContent=k==='room'?'About the room':k==='product'?'Description':'Details';
+    $('#crPrevNote').textContent=k==='room'?'How it looks in Rooms':k==='product'?'How it looks in the Marketplace':'How it looks in the feed';
+    if(k!=='post'){
+      $('#crTitle').placeholder=k==='room'?'e.g. Single room with own bathroom':'e.g. Used laptop, works well';
+      $('#crBody').placeholder=k==='room'?'What is included, the rules, how to visit. The more clear, the more calls.':'Brand, age, any faults, why you are selling.';
+      $('#crPriceBox').hidden=false;
+      $('label[for=crPrice]').textContent=k==='room'?'Monthly rent':'Price';
+      $('#crPriceHint').textContent=k==='room'?'Shown on the room card':(CR.pd.neg?'Negotiable':'Fixed price');
+      $('#crLocTitle').textContent=k==='room'?'Area':'Place';
+      $('#crLocOpt').textContent=k==='room'?'Required':'Optional';
+      $('#crPhInfo').textContent=(CR.photos.length?CR.photos.length+'/':'Up to ')+CR_MAX;
+    }else{$('#crLocTitle').textContent='Place';$('#crLocOpt').textContent='Optional'}
+    crBusyUI(crPosting,'Posting…');
   }
   function crPaintPhotos(){
     const box=$('#crPhotos'),list=CR.photos;
@@ -1774,6 +2116,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function crPaintCounts(){$('#crTitleN').textContent=CR.title.length+'/140';$('#crBodyN').textContent=CR.body.length+'/2000'}
   function crPaintFields(){
+    $('#crBeds').value=CR.rm.beds;$('#crKm').value=CR.rm.km;$('#crFrom').value=CR.rm.from;
     $('#crTitle').value=CR.title;$('#crBody').value=CR.body;$('#crPrice').value=CR.price?crFmt(CR.price):'';$('#crLoc').value=CR.loc;$('#crAlt').value=CR.alt;
     crPaintCounts();
   }
@@ -1782,6 +2125,17 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     crPrevTimer=setTimeout(()=>{
       const host=$('#crPrev');if(!host)return;
       const photos=CR.photos.filter(t=>t.url).map(t=>t.url),t=crType(),priced=!!t.price&&+CR.price>0;
+      if(CR.kind==='room'){
+        const r={id:'preview',title:CR.title.trim()||'Your room title',price:+CR.price||0,photos:[photos[0]||POOL[0]],from:CR.rm.from||TODAY,rate:'New',ll:{ver:false,name:ME.name},area:CR.loc.trim()||'Area',km:CR.rm.km||'0'};
+        host.innerHTML='<div class="rm-grid cr-pv-grid">'+cardHTML(r,0,false)+'</div>';
+        if(!photos.length){const im=$('.rc-media img',host);if(im)im.remove()}
+        return;
+      }
+      if(CR.kind==='product'){
+        const r={id:'preview',title:CR.title.trim()||'Your product',price:+CR.price||0,photos:[photos[0]||''],category:CR.pd.cat,condition:CR.pd.cond,negotiable:CR.pd.neg,status:'active',location:CR.loc.trim()||null,seller:{name:ME.name,verified:false}};
+        host.innerHTML='<div class="rm-grid cr-pv-grid">'+prodCardHTML(r,0)+'</div>';
+        return;
+      }
       const p={id:'preview',kind:(photos.length>=2||(CR.type==='room'&&photos.length>=1))?'featured':'compact',
         title:CR.title.trim()||'Your title shows here',subtitle:null,body:CR.body.trim()||'Your details show here. Say what, where and how much.',
         category:'',location:CR.loc.trim()||null,tag:CR.type==='room'?'New':null,photos,photoTotal:photos.length,moreCount:Math.max(photos.length-3,0),
@@ -1791,6 +2145,24 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     },90);
   }
   function crMissing(){
+    if(CR.kind==='room'){
+      if(CR.title.trim().length<3)return ['crTitle','Add a title (3+ letters) ✍️'];
+      if(!CR.photos.length)return ['crPhotos','Add at least one photo 📷'];
+      if(CR.loc.trim().length<2)return ['crLoc','Add the area 📍'];
+      if(CR.rm.km===''||isNaN(+CR.rm.km)||+CR.rm.km<0||+CR.rm.km>50)return ['crKm','Add the distance from campus'];
+      if(!(+CR.rm.beds>=1))return ['crBeds','Add the bedrooms'];
+      if(!(+CR.price>=1000))return ['crPrice','Add the monthly rent 💰'];
+      if(!CR.rm.from)return ['crFrom','Choose when it is available'];
+      if(CR.body.trim().length<10)return ['crBody','Describe the room (10+ letters)'];
+      return null;
+    }
+    if(CR.kind==='product'){
+      if(CR.title.trim().length<3)return ['crTitle','Add a title (3+ letters) ✍️'];
+      if(!CR.photos.length)return ['crPhotos','Add at least one photo 📷'];
+      if(!(+CR.price>0))return ['crPrice','Add the price 💰'];
+      if(CR.body.trim().length<5)return ['crBody','Describe it a little'];
+      return null;
+    }
     const t=crType();
     if(!CR.title.trim())return ['crTitle','Add a title ✍️'];
     if(!CR.body.trim())return ['crBody','Write a few details'];
@@ -1801,10 +2173,10 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     ['#crPost','#crPost2'].forEach((s,i)=>{
       const b=$(s);if(!b)return;
       b.disabled=on;b.classList.toggle('busy',on);
-      b.innerHTML=on?(i?'<span class="cr-spin sm"></span>'+text:text):(i?'<i class="fa-solid fa-paper-plane"></i>Post':'Post');
+      b.innerHTML=on?(i?'<span class="cr-spin sm"></span>'+text:text):(i?'<i class="fa-solid fa-paper-plane"></i>'+crLabel():crLabel());
     });
   }
-  function crPaintAll(){crPaintTypes();crPaintPhotos();crPaintTags();crPaintLoc();crPaintAud();crPaintFields();crPreview();crBusyUI(crPosting,'Posting…')}
+  function crPaintAll(){CR_MAX=CR_MAXES[CR.kind];crPaintKinds();crPaintTypes();crPaintPhotos();crPaintTags();crPaintLoc();crPaintAud();crPaintFields();crPaintGroups();crPaintKindUI();crPreview()}
   function crChanged(){crPaintCounts();crPreview();crSaveDraft()}
   function crShake(id){const el=$('#'+id);if(!el)return;const box=el.closest('.cr-field')||el;box.classList.remove('cr-bad');void box.offsetWidth;box.classList.add('cr-bad');el.focus({preventScroll:false});setTimeout(()=>box.classList.remove('cr-bad'),900)}
 
@@ -1837,6 +2209,15 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(t.remote&&!keepRemote)purgePhotos([t.remote]).catch(()=>{});
   }
 
+  function crSetKind(k){
+    if(k===CR.kind)return;
+    if(k==='room'&&!isLandlord()){showToast('Room listings are for landlords. Write a post about the room instead 🏠');return}
+    CR.kind=k;
+    const max=CR_MAXES[k];
+    while(CR.photos.length>max){const t=CR.photos.pop();crDropPhoto(t)}
+    crPaintAll();crSaveDraft();
+  }
+
   // ---- open / close ----
   function showCreate(type){
     if(curPage!=='create')prevPage=curPage;
@@ -1846,11 +2227,15 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     $('#crDraft').hidden=true;
     if(!crHasText()&&!CR.photos.length){
       const d=crLoadDraft();
-      if(d&&(d.title.trim()||d.body.trim()||d.loc.trim()||d.tags.length||d.alt.trim()||d.price)){Object.assign(CR,d);$('#crDraft').hidden=false}
+      if(d&&(d.title.trim()||d.body.trim()||d.loc.trim()||d.tags.length||d.alt.trim()||d.price||d.rm.km)){Object.assign(CR,d);$('#crDraft').hidden=false}
     }
-    if(type&&CR_TYPES.some(t=>t.id===type)&&!crHasText())CR.type=type;
+    if(type&&!crHasText()){
+      if(type==='product')CR.kind='product';
+      else if(type==='room'&&isLandlord())CR.kind='room';
+      else{CR.kind='post';if(CR_TYPES.some(t=>t.id===type))CR.type=type}
+    }
     crPaintAll();crReady=true;updateRail();
-    if(!isWide()&&!CR.title)setTimeout(()=>{if(curPage==='create'&&!/input|textarea/i.test((document.activeElement||{}).tagName||''))$('#crTitle').focus({preventScroll:true})},350);
+    if(!isWide()&&!CR.title&&CR.kind==='post')setTimeout(()=>{if(curPage==='create'&&!/input|textarea/i.test((document.activeElement||{}).tagName||''))$('#crTitle').focus({preventScroll:true})},350);
   }
   function openCreate(type){try{history.pushState(null,'','/create');navDepth++}catch(e){}showCreate(type)}
   function backFromCreate(){
@@ -1875,6 +2260,16 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       const run=async()=>{while(q<todo.length){const t=todo[q++];t.remote=await uploadPostImage(t.blob,t.ext);trashAdd([t.remote],600000);done++;crBusyUI(true,'Uploading '+done+'/'+total)}};
       await Promise.all(Array.from({length:Math.min(3,todo.length)},run));
       crBusyUI(true,'Posting…');
+      const urls=CR.photos.map(x=>x.remote);
+      if(CR.kind==='room'){
+        const rm=CR.rm;
+        const r=await rpc('create_room',{p_title:CR.title.trim(),p_type:rm.type,p_area:CR.loc.trim(),p_km:+rm.km,p_price:+CR.price,p_beds:+rm.beds,p_bath:rm.bath,p_fac:rm.fac,p_from:rm.from,p_deposit:rm.dep,p_min:rm.min,p_about:CR.body.trim(),p_photos:urls});
+        trashDrop(urls);crAfterRoom(r);return;
+      }
+      if(CR.kind==='product'){
+        const r=await rpc('create_product',{p_title:CR.title.trim(),p_category:CR.pd.cat,p_condition:CR.pd.cond,p_price:+CR.price,p_negotiable:CR.pd.neg,p_description:CR.body.trim(),p_location:CR.loc.trim()||null,p_photos:urls});
+        trashDrop(urls);crAfterProduct(r);return;
+      }
       const t=crType();
       const p=await rpc('create_post',{p_title:CR.title.trim(),p_body:CR.body.trim(),p_location:CR.loc.trim()||null,p_type:CR.type,p_photos:CR.photos.map(x=>x.remote),
         p_price:t.price&&+CR.price>0?+CR.price:null,p_tags:CR.tags,p_audience:CR.aud,p_comments:CR.cm,p_alt:CR.photos.length&&CR.alt.trim()?CR.alt.trim():null});
@@ -1884,6 +2279,22 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       const m=String((e&&e.message)||'');
       fail(/row-level|mime|size|bucket|Invalid photo|storage|Payload/i.test(m)?'A photo could not be uploaded':(m&&m.length<70?m:'Could not post. Try again'));
     }finally{crPosting=false;crBusyUI(false)}
+  }
+  function crFinish(){
+    CR.photos.forEach(t=>crDropPhoto(t,true));CR=crNew();crClearDraft();crPaintAll();
+  }
+  function crAfterRoom(r){
+    ROOMS.unshift(r);crFinish();
+    setPage('rooms');try{history.replaceState(null,'','/rooms');if(navDepth>0)navDepth--}catch(e){}
+    setTimeout(()=>openRoom(r.id),250);
+    showToast('Room listed 🏠');
+  }
+  function crAfterProduct(p){
+    crFinish();
+    DETPROD[p.id]=p;MK.cat='all';MK.mine=false;MK.q='';MK.started=false;
+    setPage('market');try{history.replaceState(null,'','/market');if(navDepth>0)navDepth--}catch(e){}
+    setTimeout(()=>openProduct(p.id),250);
+    showToast('Product listed 🛍️');
   }
   function crAfterPost(p){
     const art=makePosts([p])[0];$('#feed').prepend(art);setupPost(art);
@@ -1913,6 +2324,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(id==='crPrice'){const d=e.target.value.replace(/\D/g,'').slice(0,9);CR.price=d;e.target.value=d?crFmt(d):''}
     else if(id==='crLoc'){CR.loc=e.target.value;$$('#crLocChips .cr-chip').forEach(c=>c.classList.toggle('on',c.dataset.loc===CR.loc))}
     else if(id==='crAlt')CR.alt=e.target.value;
+    else if(id==='crBeds')CR.rm.beds=e.target.value.replace(/\D/g,'').slice(0,2);
+    else if(id==='crKm')CR.rm.km=e.target.value.replace(/[^0-9.]/g,'').slice(0,5);
+    else if(id==='crFrom')CR.rm.from=e.target.value;
     else return;
     crChanged();
   });
@@ -1923,6 +2337,17 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   });
   crRoot.addEventListener('focusout',e=>{if(e.target.id==='crTagIn'&&e.target.value.trim()){if(crAddTag(e.target.value))e.target.value=''}});
   crRoot.addEventListener('click',e=>{
+    const kd=e.target.closest('[data-kind]');
+    if(kd){crSetKind(kd.dataset.kind);return}
+    const gv=e.target.closest('[data-gv]');
+    if(gv){
+      const g=gv.closest('[data-g]').dataset.g,v=gv.dataset.gv;
+      if(g==='rtype')CR.rm.type=v;else if(g==='bath')CR.rm.bath=v;else if(g==='dep')CR.rm.dep=v;else if(g==='min')CR.rm.min=v;
+      else if(g==='fac'){const i=CR.rm.fac.indexOf(v);if(i>-1)CR.rm.fac.splice(i,1);else CR.rm.fac.push(v)}
+      else if(g==='cat')CR.pd.cat=v;else if(g==='cond')CR.pd.cond=v;
+      crPaintGroups();crPreview();crSaveDraft();return;
+    }
+    if(e.target.closest('#crNeg')){CR.pd.neg=!CR.pd.neg;crPaintGroups();crPaintKindUI();crPreview();crSaveDraft();return}
     const ty=e.target.closest('[data-type]');
     if(ty){CR.type=ty.dataset.type;crPaintTypes();crPaintTags();crChanged();return}
     const ph=e.target.closest('[data-ph]');
@@ -1957,6 +2382,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const want=(isWide()&&curPage==='create')?rail:host;
     if(box.parentNode!==want){if(want===rail)rail.insertBefore(box,rail.firstChild);else want.appendChild(box)}
   }
+
+  if(curPage==='market')renderMarket();
 
   // =====================================================================
   // THREE-DOT MENUS, EDIT / REPORT / DELETE, AND KEEPING STORAGE CLEAN
@@ -2283,9 +2710,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // ---- room menu ----
   function openRoomMenu(anchor){
     const r=curRoom;if(!r)return;
-    const it=[{icon:'fa-link',t:'Copy link',fn:()=>copyText(roomLink(r.id),'Room link copied 🔗')}];
+    const own=r.ll.id===ME.id,it=[];
+    if(own)it.push({icon:'fa-pen',t:'Edit room',s:'Price, details, photos',fn:()=>openEditRoom(r)});
+    it.push({icon:'fa-link',t:'Copy link',fn:()=>copyText(roomLink(r.id),'Room link copied 🔗')});
     if(canShare)it.push({icon:'fa-share-nodes',t:'Share…',fn:()=>shareLink(roomLink(r.id),r.title)});
-    it.push({icon:'fa-flag',t:'Report this listing',danger:true,fn:()=>openReport('room',r.id,anchor,()=>openRoomMenu(anchor))});
+    if(own)it.push({icon:'fa-trash',t:'Delete room',s:'Also deletes its photos',danger:true,fn:()=>deleteRoom(r)});
+    else it.push({icon:'fa-flag',t:'Report this listing',danger:true,fn:()=>openReport('room',r.id,anchor,()=>openRoomMenu(anchor))});
     openMenu(anchor,'',it);
   }
   $('#rdMore').addEventListener('click',e=>openRoomMenu(e.currentTarget));

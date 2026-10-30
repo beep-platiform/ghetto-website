@@ -128,3 +128,15 @@ Notes
 - **Public pages for Google.** `/post/<id>` and `/rooms/<id>` are real server-rendered pages: logged-in people get the app with the post/room opened; everyone else (and search engines) gets a readable page with title, photos, text, `<title>`, description, canonical link, Open Graph/Twitter tags and JSON-LD (`SocialMediaPosting` for posts, `Product` + offer for rooms). Only posts meant for **Everyone**, from accounts that are **not private**, are public. `/sitemap.xml` lists them and `/robots.txt` points to it. Everything else (feed, profiles, settings, notifications) stays behind login.
 - Set `NEXT_PUBLIC_SITE_URL` (for example `https://yourname.vercel.app` or your own domain) on Vercel so links in search results are right. After deploying, submit `https://<your site>/sitemap.xml` in Google Search Console.
 - Run `0009_public_pages.sql` and `0010_get_room` after 0008 (both already applied to the `ghetto` project): `get_public_post`, `get_public_room`, `public_sitemap` (callable without login, read-only) and `get_room`.
+
+## Posts, rooms and the marketplace
+
+One **Create** page with a chooser at the top: **Post**, **Room**, **Product**. The form changes with the choice.
+
+- **Post** (everyone): the normal feed post. Non-landlords can pick the type "About a room"; it stays a post and is never listed in Rooms.
+- **Room** (landlords only, `profiles.role = 'Landlord'`, enforced in the database by `create_room`): full form (type, price, bedrooms, bathroom, distance, facilities, available from, deposit, minimum stay, 1–8 photos). New rooms appear first in Rooms. The owner gets **Edit room** and **Delete room** in the ⋯ menu.
+- **Product** (everyone): marketplace listing (category, condition, price, negotiable, description, place, 1–6 photos). Page `/market`, product `/market/<id>`. Seller can edit, mark sold/available or delete; buyers can message the seller (sent as a notification) or report.
+
+Deleting a room or product (or removing a photo while editing) also deletes the files from Storage. Edit screens can remove photos but not add new ones.
+Public pages `/market/<id>` are indexable and listed in `sitemap.xml`.
+Database: `supabase/migrations/0011_listings.sql` (already applied to the project).

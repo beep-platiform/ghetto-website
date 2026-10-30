@@ -21,13 +21,15 @@ import SettingsPage from './SettingsPage';
 import SettingsSheets from './SettingsSheets';
 import ActionMenu from './ActionMenu';
 import PostSheets from './PostSheets';
+import MarketPage from './MarketPage';
+import ProductDetail from './ProductDetail';
 import type { AppData, Profile, Settings } from '../lib/types';
 
 /**
  * Home, Rooms and Profile share one shell (sidebar, right column, sheets), so switching between them is instant.
  * `page` decides which one is showing first; /  -> home, /rooms -> rooms, /profile[/username] -> profile, /settings -> settings, /create -> the new-post page.
  */
-export default function AppShell({ page, data, profile, settings }: { page: 'home' | 'rooms' | 'profile' | 'settings' | 'create'; data: AppData; profile?: Profile | null; settings?: Settings | null }) {
+export default function AppShell({ page, data, profile, settings }: { page: 'home' | 'rooms' | 'market' | 'profile' | 'settings' | 'create'; data: AppData; profile?: Profile | null; settings?: Settings | null }) {
   return (
     <>
       <div className="shell">
@@ -45,12 +47,14 @@ export default function AppShell({ page, data, profile, settings }: { page: 'hom
           </div>
 
           <RoomsPage />
+          <MarketPage />
           <ProfilePage />
           <SettingsPage />
           <CreatePage />
           <FabMenu />
           <BottomNav page={page} />
           <RoomDetail />
+          <ProductDetail />
           <FilterSheet />
           <ContactSheet />
           <ProfileSheets />

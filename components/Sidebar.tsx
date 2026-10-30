@@ -2,7 +2,7 @@
 import type { AppData } from '../lib/types';
 import { faceUrl } from '../lib/format';
 
-export default function Sidebar({ page, me }: { page: 'home' | 'rooms' | 'profile' | 'settings' | 'create'; me: AppData['me'] }) {
+export default function Sidebar({ page, me }: { page: 'home' | 'rooms' | 'market' | 'profile' | 'settings' | 'create'; me: AppData['me'] }) {
   return (
     <aside className="side" id="side" aria-label="Main navigation">
       <button className="s-brand" id="sBrand" aria-label="Ghetto home">
@@ -12,7 +12,7 @@ export default function Sidebar({ page, me }: { page: 'home' | 'rooms' | 'profil
       <button className={'s-item' + (page === 'home' ? ' active' : '')} data-page="home"><i className="fa-solid fa-house"></i><span className="s-label">Home</span></button>
       <button className="s-item" data-page="search"><i className="fa-solid fa-magnifying-glass"></i><span className="s-label">Search</span></button>
       <button className={'s-item' + (page === 'rooms' ? ' active' : '')} data-page="rooms"><i className="fa-regular fa-building"></i><span className="s-label">Rooms</span></button>
-      <button className="s-item" data-page="community"><i className="fa-solid fa-user-group"></i><span className="s-label">Community</span></button>
+      <button className={'s-item' + (page === 'market' ? ' active' : '')} data-page="market"><i className="fa-solid fa-bag-shopping"></i><span className="s-label">Market</span></button>
       <button className="s-item" data-page="notifications"><i className="fa-regular fa-bell"></i><span className="s-label">Notifications</span><span className="s-badge" id="sideBellDot"></span></button>
       <button className={'s-item' + (page === 'profile' ? ' active' : '')} data-page="profile"><i className="fa-regular fa-user"></i><span className="s-label">Profile</span></button>
       <button className={'s-item' + (page === 'settings' ? ' active' : '')} data-page="settings"><i className="fa-solid fa-gear"></i><span className="s-label">Settings</span></button>

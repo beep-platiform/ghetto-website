@@ -23,8 +23,11 @@ async function call<T>(fn: string, args?: Record<string, unknown>): Promise<T | 
 export type PublicPost = { id: string; title: string; body: string; location: string | null; photos: string[]; type: string; price: number | null; tags: string[]; alt: string | null; createdAt: string; author: { name: string; handle: string; role: string; verified: boolean } };
 export type PublicRoom = { id: string; title: string; type: string; area: string; price: number; beds: number; bath: string; fac: string[]; photos: string[]; about: string; rate: number; rev: number; from: string; deposit: string | null; minStay: string | null; createdAt: string; landlord: { name: string; handle: string; verified: boolean } };
 
+export type PublicProduct = { id: string; title: string; category: string; condition: string; price: number; negotiable: boolean; description: string; location: string | null; photos: string[]; status: string; createdAt: string; seller: { name: string; handle: string; verified: boolean } };
+
 export const getPublicPost = (id: string) => (isUuid(id) ? call<PublicPost>('get_public_post', { p_post: id }) : Promise.resolve(null));
 export const getPublicRoom = (id: string) => call<PublicRoom>('get_public_room', { p_room: id });
-export const getSitemap = () => call<{ posts: { id: string; at: string }[]; rooms: { id: string; at: string }[] }>('public_sitemap');
+export const getPublicProduct = (id: string) => (isUuid(id) ? call<PublicProduct>('get_public_product', { p_product: id }) : Promise.resolve(null));
+export const getSitemap = () => call<{ posts: { id: string; at: string }[]; rooms: { id: string; at: string }[]; products?: { id: string; at: string }[] }>('public_sitemap');
 
 export const snippet = (s: string, n = 155) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + '…'; };

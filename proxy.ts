@@ -25,7 +25,7 @@ export async function proxy(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   // login, and the public read-only pages that search engines index: a post, a single room, the sitemap
-  const open = path === '/login' || path.startsWith('/auth/') || /^\/post\/[^/]+$/.test(path) || /^\/rooms\/[^/]+$/.test(path) || path === '/sitemap.xml' || path === '/robots.txt';
+  const open = path === '/login' || path.startsWith('/auth/') || /^\/post\/[^/]+$/.test(path) || /^\/rooms\/[^/]+$/.test(path) || /^\/market\/[^/]+$/.test(path) || path === '/sitemap.xml' || path === '/robots.txt';
   if (!user && !open) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
