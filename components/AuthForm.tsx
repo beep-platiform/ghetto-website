@@ -13,7 +13,7 @@ export default function AuthForm({ linkError }: { linkError?: boolean }) {
   const [handle, setHandle] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'Student' | 'Landlord'>('Student');
+  const [role, setRole] = useState<'Student' | 'Landlord' | 'Commissioner'>('Student');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(linkError ? 'That confirmation link did not work. Please log in, or sign up again.' : '');
@@ -110,6 +110,7 @@ export default function AuthForm({ linkError }: { linkError?: boolean }) {
               <div className="ep-seg">
                 <button type="button" className={role === 'Student' ? 'on' : ''} onClick={() => setRole('Student')}><i className="fa-solid fa-graduation-cap"></i>Student</button>
                 <button type="button" className={role === 'Landlord' ? 'on' : ''} onClick={() => setRole('Landlord')}><i className="fa-solid fa-key"></i>Landlord</button>
+                <button type="button" className={role === 'Commissioner' ? 'on' : ''} onClick={() => setRole('Commissioner')}><i className="fa-solid fa-handshake"></i>Agent</button>
               </div>
             </>
           )}

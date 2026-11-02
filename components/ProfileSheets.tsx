@@ -30,6 +30,7 @@ export default function ProfileSheets() {
               <div className="ep-seg" id="epRole">
                 <button type="button" data-role="Student"><i className="fa-solid fa-graduation-cap"></i>Student</button>
                 <button type="button" data-role="Landlord"><i className="fa-solid fa-key"></i>Landlord</button>
+                <button type="button" data-role="Commissioner"><i className="fa-solid fa-handshake"></i>Commissioner</button>
               </div>
 
               <div className="ep-l">Profile photo</div>

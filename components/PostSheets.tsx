@@ -95,6 +95,7 @@ export default function PostSheets() {
               <textarea id="xrAbout" rows={5} maxLength={2000}></textarea>
               <div className="ep-l">Photos</div>
               <div className="cr-photos xp-ph" id="xrPhotos"></div>
+              <input type="file" id="xrFile" accept="image/*" multiple hidden />
               <small className="ep-h" id="xrPhNote"></small>
               <div className="cs-err" id="xrErr" role="alert"></div>
               <button type="button" className="cs-send" id="xrSave">Save changes</button>
@@ -124,6 +125,7 @@ export default function PostSheets() {
               <textarea id="xqDesc" rows={5} maxLength={2000}></textarea>
               <div className="ep-l">Photos</div>
               <div className="cr-photos xp-ph" id="xqPhotos"></div>
+              <input type="file" id="xqFile" accept="image/*" multiple hidden />
               <small className="ep-h" id="xqPhNote"></small>
               <div className="cs-err" id="xqErr" role="alert"></div>
               <button type="button" className="cs-send" id="xqSave">Save changes</button>

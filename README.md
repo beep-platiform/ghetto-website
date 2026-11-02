@@ -140,3 +140,11 @@ One **Create** page with a chooser at the top: **Post**, **Room**, **Product**. 
 Deleting a room or product (or removing a photo while editing) also deletes the files from Storage. Edit screens can remove photos but not add new ones.
 Public pages `/market/<id>` are indexable and listed in `sitemap.xml`.
 Database: `supabase/migrations/0011_listings.sql` (already applied to the project).
+
+## Messages, Commissioner role, profile tabs
+
+- **Messages** (`/messages`, one chat at `/messages/<id>`): a chat list and one-to-one chats. "Contact landlord", "Message seller" and the profile **Message** button all start a chat (a room or product shows as a small card above the first message). New messages arrive by checking every ~5 seconds (every ~20 s in the background); the message icon in the top bar (and the Messages item in the desktop sidebar) shows the unread count. A person's "Who can message me" setting is respected.
+- **Top bar / bottom bar:** the profile picture moved to the bottom bar's Profile button; the top bar now has a message icon next to the bell.
+- **Commissioner:** a third role (sign-up, Edit profile). Landlords and commissioners can list rooms; everyone can sell products.
+- **Profile:** new **Products** tab on every profile (own profile also shows a **Rooms** tab for landlords/commissioners). Editing a room or product can now add photos as well as remove them.
+- Database: `supabase/migrations/0012_messages_commissioner.sql` (already applied).

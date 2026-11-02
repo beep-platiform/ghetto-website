@@ -147,9 +147,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     history.pushState=function(){const r=ps.apply(null,arguments);lastPath=location.pathname;return r};
     history.replaceState=function(){const r=rs.apply(null,arguments);lastPath=location.pathname;return r};
   })();
-  const isOvPath=p=>/^\/(post\/|notifications$|search$)/.test(p)||/^\/(rooms|market)\/[^/]/.test(p);
+  const isOvPath=p=>/^\/(post\/|notifications$|search$)/.test(p)||/^\/(rooms|market|messages)\/[^/]/.test(p);
   const ovPush=url=>{if(URLSYNC||location.pathname===url)return;try{history.pushState({ov:1},'',url)}catch(e){}};
-  const baseUrl=()=>curPage==='rooms'?'/rooms':curPage==='market'?'/market':curPage==='profile'?(curProfile?profPath(curProfile.handle):'/profile'):curPage==='settings'?'/settings':curPage==='create'?'/create':'/';
+  const baseUrl=()=>curPage==='rooms'?'/rooms':curPage==='market'?'/market':curPage==='messages'?'/messages':curPage==='profile'?(curProfile?profPath(curProfile.handle):'/profile'):curPage==='settings'?'/settings':curPage==='create'?'/create':'/';
   // close something that was opened on top: go Back if we pushed it, otherwise close it and fix the address
   function ovBack(close){
     if(history.state&&history.state.ov){history.back();return}
@@ -158,6 +158,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   const ovMissing=()=>{if(isOvPath(location.pathname)){try{history.replaceState(null,'',baseUrl())}catch(e){}}};
   const DETROOM={};
+  const pageUrl=pg=>pg==='rooms'?'/rooms':pg==='market'?'/market':pg==='messages'?'/messages':'/';
 
   // nav
   $$('.nav-item').forEach(b=>b.addEventListener('click',()=>{
@@ -849,6 +850,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(pg==='home')goHome();
     else if(pg==='search')$('#searchBtn').click();
     else if(pg==='notifications')$('#bellBtn').click();
+    else if(pg==='messages')openMessages();
     else if(pg==='settings')openSettings();
     else{closeSheets();const nav=NAVS.find(n=>n.textContent.trim().toLowerCase()===pg);if(nav)nav.click()}
   });
@@ -1116,11 +1118,14 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(detail.classList.contains('open'))closePost();
     if(roomDetail.classList.contains('open'))closeRoom();
     if(prodDetail.classList.contains('open'))closeProduct();
+    if(isChatOpen())closeChat();
     $$('.nav-item').forEach(n=>n.classList.toggle('active',n.textContent.trim().toLowerCase()===pg));
     syncSide();
     const ss=$('.s-item[data-page="settings"]');if(ss)ss.classList.toggle('active',pg==='settings');
     if(pg==='rooms'){renderRooms(true);$('#rmScroll').scrollTop=0}
     if(pg==='market')renderMarket();
+    if(pg==='messages')renderMessages();
+    const sm=$('.s-item[data-page="messages"]');if(sm)sm.classList.toggle('active',pg==='messages');
     updateRail();
     if(pg==='home'&&feedRun)setTimeout(feedRun,80);
   }
@@ -1135,8 +1140,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const facts=[['Type',RTYPE[r.type]],['Bedrooms',r.beds],['Bathroom',r.bath],['Available',availTxt(r)],['Deposit',r.dep],['Minimum stay',r.min]];
     const revs=(r.reviews||[]).slice(0,3);
     const sim=ROOMS.filter(x=>x.id!==r.id&&(x.type===r.type||x.area===r.area)).slice(0,4);
+    $('#rdContactBtn').innerHTML='<i class="fa-regular fa-comment-dots"></i>Contact '+(ll.role==='Commissioner'?'commissioner':'landlord');
     $('#rdBody').innerHTML=gal+'<div class="rd-pad">'+
-      '<div class="rd-tags"><span class="tag">'+RTYPE[r.type]+'</span>'+(ll.ver?'<span class="tag green">Verified landlord</span>':'')+'</div>'+
+      '<div class="rd-tags"><span class="tag">'+RTYPE[r.type]+'</span>'+(ll.ver?'<span class="tag green">Verified '+(ll.role==='Commissioner'?'commissioner':'landlord')+'</span>':'')+'</div>'+
       '<h1 class="rd-title">'+esc(r.title)+'</h1>'+
       '<div class="rd-price"><b>'+rfmt(r.price)+' RWF</b><small>/ month</small></div>'+
       '<div class="rd-loc"><i class="fa-solid fa-location-dot"></i>'+esc(r.area)+' · '+r.km+' km from campus<span class="rd-rate"><i class="fa-solid fa-star"></i>'+r.rate+'<small>('+r.rev+' reviews)</small></span></div>'+
@@ -1144,7 +1150,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       '<h3 class="rd-h">About this room</h3><p class="rd-about">'+esc(r.about)+'</p>'+
       '<div class="rd-facts">'+facts.map(f=>'<div class="fact"><small>'+f[0]+'</small><b>'+esc(String(f[1]))+'</b></div>').join('')+'</div>'+
       '<div class="rd-ll"><div class="avatar"><img src="'+FACE(ll.av)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b>'+
-        '<small>'+(ll.ver?'<span class="ok">Verified Landlord</span> · ':'')+ll.joined+'</small><small>Replies '+ll.reply+'</small></div>'+
+        '<small>'+(ll.ver?'<span class="ok">Verified '+(ll.role==='Commissioner'?'Commissioner':'Landlord')+'</span> · ':'')+ll.joined+'</small><small>Replies '+ll.reply+'</small></div>'+
         '<button class="btn-ghost rd-msg">Message</button></div>'+
       '<h3 class="rd-h">Gallery</h3><div class="rd-thumbs">'+r.photos.slice(0,4).map((id,k)=>'<div class="th" data-i="'+k+'"><img src="'+rimg(id,240,240)+'" alt="" onerror="this.remove()">'+(k===3&&r.photos.length>4?'<span class="more">+'+(r.photos.length-4)+'</span>':'')+'</div>').join('')+'</div>'+
       '<h3 class="rd-h">Location</h3><div class="rd-map"><span class="rd-pin-ring"></span><i class="fa-solid fa-location-dot rd-pin"></i>'+
@@ -1159,7 +1165,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       '<div class="rr-meta">'+availPill(r)+'<span class="rc-rate"><i class="fa-solid fa-star"></i>'+r.rate+'<small>('+r.rev+')</small></span></div>'+
       '<div class="rr-field"><label for="rrDate">Planned move-in date</label><label class="fp-date"><i class="fa-regular fa-calendar"></i><input type="date" id="rrDate" min="'+TODAY+'" value="'+(r.from>TODAY?r.from:TODAY)+'"></label></div>'+
       '<button type="button" class="rr-btn primary rr-visit"><i class="fa-solid fa-calendar-check"></i>Request a visit</button>'+
-      '<button type="button" class="rr-btn ghost rr-contact"><i class="fa-regular fa-comment-dots"></i>Message landlord</button>'+
+      '<button type="button" class="rr-btn ghost rr-contact"><i class="fa-regular fa-comment-dots"></i>Message '+(ll.role==='Commissioner'?'commissioner':'landlord')+'</button>'+
       '<div class="rr-ll"><div class="avatar"><img src="'+FACE(ll.av)+'" alt="" onerror="this.remove()"></div><div><b>'+esc(ll.name)+(ll.ver?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>Replies '+ll.reply+'</small></div></div>'+
       '<p class="rr-note"><i class="fa-solid fa-shield-halved"></i>Visit first. Never pay before you have seen the room and met the landlord.</p></div>'+
       '<section class="r-card"><h3>Similar rooms</h3>'+sim.slice(0,3).map(x=>'<div class="sv" data-room="'+x.id+'"><div class="sv-img"><img src="'+rimg(x.photos[0],120,120)+'" alt="" onerror="this.remove()"></div><div class="sv-t"><b>'+esc(x.title)+'</b><small>'+rfmt(x.price)+' RWF / month · '+esc(x.area)+'</small></div><i class="fa-solid fa-chevron-right"></i></div>').join('')+'</section>';
@@ -1173,7 +1179,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function openRoom(id,noPush){
     const r=ROOMS.find(x=>x.id===id)||DETROOM[id];if(!r)return;
     curRoom=r;buildRoom(r);
-    roomDetail.classList.add('open');roomDetail.setAttribute('aria-hidden','false');
+    raiseOv(roomDetail);roomDetail.classList.add('open');roomDetail.setAttribute('aria-hidden','false');
     const sc=$('#rdScroll');sc.style.scrollBehavior='auto';sc.scrollTop=0;sc.style.scrollBehavior='';
     updateRail();
     if(!noPush)ovPush('/rooms/'+encodeURIComponent(id));
@@ -1272,13 +1278,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(!msg){showToast('Write a message first ✍️');return}
     if(ctMode==='product'&&curProd){
       const pr=curProd;btn.disabled=true;
-      rpc('send_product_message',{p_product:pr.id,p_body:msg}).then(()=>{showToast('Message sent to '+pr.seller.name+' 🎉');closeBSheet(contactSheet)}).catch(()=>fail('Message not sent')).finally(()=>{btn.disabled=false});
+      openChatWith(pr.seller.id,{body:msg,kind:'product',topic:pr.id}).then(()=>{closeBSheet(contactSheet);showToast('Message sent to '+pr.seller.name+' 🎉')}).catch(e=>fail(epErr(e))).finally(()=>{btn.disabled=false});
       return;
     }
     btn.disabled=true;
-    rpc('send_room_message',{p_room:room.id,p_body:msg})
-      .then(()=>{showToast('Message sent to '+room.ll.name+' 🎉');closeBSheet(contactSheet)})
-      .catch(()=>fail('Message not sent'))
+    openChatWith(room.ll.id,{body:msg,kind:'room',topic:room.id})
+      .then(()=>{closeBSheet(contactSheet);showToast('Message sent to '+room.ll.name+' 🎉')})
+      .catch(e=>fail(epErr(e)))
       .finally(()=>{btn.disabled=false});
   });
   $('#csCall').addEventListener('click',()=>showToast('Calling '+curRoom.ll.name+' 📞'));
@@ -1287,6 +1293,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(e.key!=='Escape')return;
     if(contactSheet.classList.contains('open')){closeBSheet(contactSheet);return}
     if(filterSheet.classList.contains('open')){closeBSheet(filterSheet);return}
+    if(isChatOpen()&&!viewer.classList.contains('open')){ovBack(closeChat);return}
     if(prodDetail.classList.contains('open')&&!viewer.classList.contains('open')){ovBack(closeProduct);return}
     if(roomDetail.classList.contains('open')&&!viewer.classList.contains('open'))ovBack(closeRoom);
   });
@@ -1381,7 +1388,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     const p=MK.items.find(x=>x.id===id)||DETPROD[id];
     if(!p){openProductById(id,noPush);return}
     curProd=p;buildProduct(p);
-    prodDetail.classList.add('open');prodDetail.setAttribute('aria-hidden','false');
+    raiseOv(prodDetail);prodDetail.classList.add('open');prodDetail.setAttribute('aria-hidden','false');
     $('#pdScroll').scrollTop=0;
     if(!noPush)ovPush('/market/'+id);
   }
@@ -1393,8 +1400,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     }).catch(()=>{fail('Could not open that product');ovMissing()});
   }
   function closeProduct(){prodDetail.classList.remove('open');prodDetail.setAttribute('aria-hidden','true');closeBSheet(contactSheet)}
+  function pfProdsDirty(){if(curProfile&&curProfile.isMe){curProfile._prods=null;if(curPage==='profile'&&pfTab==='products')renderPfList()}}
   function setProduct(p){
-    DETPROD[p.id]=p;
+    DETPROD[p.id]=p;pfProdsDirty();
     const i=MK.items.findIndex(x=>x.id===p.id);if(i>-1)MK.items[i]=p;
     const el=$('[data-prod="'+p.id+'"]',mkGrid);if(el){const t=document.createElement('div');t.innerHTML=prodCardHTML(p,0);t.firstChild.classList.add('na');el.replaceWith(t.firstChild)}
     if(curProd&&curProd.id===p.id){curProd=p;buildProduct(p)}
@@ -1420,7 +1428,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(!ok)return;
     try{
       const r=await rpc('delete_product',{p_product:p.id});
-      MK.items=MK.items.filter(x=>x.id!==p.id);delete DETPROD[p.id];
+      MK.items=MK.items.filter(x=>x.id!==p.id);delete DETPROD[p.id];pfProdsDirty();
       const el=$('[data-prod="'+p.id+'"]',mkGrid);if(el)el.remove();
       if(prodDetail.classList.contains('open'))ovBack(closeProduct);
       paintMkMore();showToast('Product deleted 🗑️');
@@ -1466,12 +1474,30 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   // ---- shared bits of the edit sheets ----
   function epPhotos(st,box,note){
-    box.innerHTML=st.photos.map((u,i)=>'<div class="cr-ph"><img alt="" src="'+esc(u)+'"><button type="button" class="cr-rm" data-prm="'+i+'" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button></div>').join('');
-    note.textContent=st.removed.length?st.removed.length+(st.removed.length===1?' photo':' photos')+' will be deleted from storage when you save.':'Taking a photo off deletes the file for good. Keep at least one.';
+    box.innerHTML=st.photos.map((it,i)=>'<div class="cr-ph"><img alt="" src="'+esc(it.u)+'"><button type="button" class="cr-rm" data-prm="'+i+'" aria-label="Remove photo"><i class="fa-solid fa-xmark"></i></button></div>').join('')+
+      (st.photos.length<st.max?'<button type="button" class="cr-add" data-padd="1" aria-label="Add photos"><i class="fa-solid fa-plus"></i></button>':'');
+    note.textContent=(st.photos.some(x=>x.blob)?'New photos upload when you save. ':'')+(st.removed.length?st.removed.length+(st.removed.length===1?' photo':' photos')+' will be deleted from storage when you save.':'Taking a photo off deletes the file for good. Keep at least one.');
   }
   function epDropPhoto(st,i,box,note){
     if(st.photos.length<=1){showToast('Keep at least one photo 📷');return}
-    const [u]=st.photos.splice(i,1);st.removed.push(u);epPhotos(st,box,note);
+    const it=st.photos.splice(i,1)[0];
+    if(it.blob){try{URL.revokeObjectURL(it.u)}catch(e){}}else st.removed.push(it.u);
+    epPhotos(st,box,note);
+  }
+  async function epAdd(st,files,box,note){
+    const room=st.max-st.photos.length;
+    if(room<=0){showToast('Up to '+st.max+' photos');return}
+    for(const f of Array.from(files).slice(0,room)){
+      try{const r=await compressImage(f);st.photos.push({u:URL.createObjectURL(r.blob),blob:r.blob,ext:r.ext})}catch(e){fail('That photo could not be used')}
+    }
+    epPhotos(st,box,note);
+  }
+  // upload the new photos (3 at a time) and give back the final list of addresses
+  async function epUpload(st){
+    const todo=st.photos.filter(x=>x.blob&&!x.remote);let q=0;
+    const run=async()=>{while(q<todo.length){const t=todo[q++];t.remote=await uploadPostImage(t.blob,t.ext);trashAdd([t.remote],600000)}};
+    await Promise.all(Array.from({length:Math.min(3,todo.length)},run));
+    return st.photos.map(x=>x.remote||x.u);
   }
   const epErr=e=>{const m=String((e&&e.message)||'');return m&&m.length<90?m:'Could not save. Try again'};
   const numOnly=v=>String(v).replace(/\D/g,'').slice(0,9);
@@ -1486,13 +1512,14 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function openEditRoom(r){
     if(!r||r.ll.id!==ME.id)return;
-    XR={id:r.id,photos:r.photos.filter(isU),removed:[],type:r.type,bath:r.bath,dep:RM_DEP.indexOf(r.dep)>-1?r.dep:'1 month',min:RM_MIN.indexOf(r.min)>-1?r.min:'3 months',fac:r.fac.slice()};
+    XR={id:r.id,max:8,photos:r.photos.filter(isU).map(u=>({u})),removed:[],type:r.type,bath:r.bath,dep:RM_DEP.indexOf(r.dep)>-1?r.dep:'1 month',min:RM_MIN.indexOf(r.min)>-1?r.min:'3 months',fac:r.fac.slice()};
     $('#xrTitle').value=r.title;$('#xrArea').value=r.area;$('#xrPrice').value=rfmt(r.price);$('#xrKm').value=r.km;$('#xrBeds').value=r.beds;
     $('#xrFrom').value=r.from<TODAY?TODAY:r.from;$('#xrAbout').value=r.about;$('#xrAboutN').textContent=r.about.length+'/2000';$('#xrErr').textContent='';$('#xrSave').disabled=false;
     xrPaintGroups();epPhotos(XR,$('#xrPhotos'),$('#xrPhNote'));openBSheet(xrSheet);
   }
   xrSheet.addEventListener('click',e=>{
     if(e.target.closest('.bs-back,.bs-close')){closeBSheet(xrSheet);return}
+    if(e.target.closest('[data-padd]')){$('#xrFile').click();return}
     const rm=e.target.closest('[data-prm]');if(rm){epDropPhoto(XR,+rm.dataset.prm,$('#xrPhotos'),$('#xrPhNote'));return}
     const gv=e.target.closest('[data-gv]');if(!gv)return;
     const g=gv.closest('[data-xg]').dataset.xg,v=gv.dataset.gv;
@@ -1500,19 +1527,25 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(g==='fac'){const i=XR.fac.indexOf(v);if(i>-1)XR.fac.splice(i,1);else XR.fac.push(v)}
     xrPaintGroups();
   });
+  $('#xrFile').addEventListener('change',e=>{if(XR)epAdd(XR,e.target.files,$('#xrPhotos'),$('#xrPhNote'));e.target.value=''});
+  $('#xqFile').addEventListener('change',e=>{if(XQ)epAdd(XQ,e.target.files,$('#xqPhotos'),$('#xqPhNote'));e.target.value=''});
   $('#xrAbout').addEventListener('input',e=>{$('#xrAboutN').textContent=e.target.value.length+'/2000'});
   $('#xrPrice').addEventListener('input',e=>{const d=numOnly(e.target.value);e.target.value=d?crFmt(d):''});
   $('#xrSave').addEventListener('click',async()=>{
     if(!XR)return;const btn=$('#xrSave'),err=$('#xrErr');err.textContent='';btn.disabled=true;
     try{
+      if(XR.photos.some(x=>x.blob))btn.textContent='Uploading…';
+      const urls=await epUpload(XR);
       const res=await rpc('update_room',{p_room:XR.id,p_title:$('#xrTitle').value,p_type:XR.type,p_area:$('#xrArea').value,p_km:+$('#xrKm').value,p_price:+($('#xrPrice').value.replace(/\D/g,'')||0),
-        p_beds:+$('#xrBeds').value,p_bath:XR.bath,p_fac:XR.fac,p_from:$('#xrFrom').value,p_deposit:XR.dep,p_min:XR.min,p_about:$('#xrAbout').value,p_photos:XR.photos});
+        p_beds:+$('#xrBeds').value,p_bath:XR.bath,p_fac:XR.fac,p_from:$('#xrFrom').value,p_deposit:XR.dep,p_min:XR.min,p_about:$('#xrAbout').value,p_photos:urls});
+      trashDrop(urls);
       const i=ROOMS.findIndex(x=>x.id===XR.id);if(i>-1)ROOMS[i]=res.room;else DETROOM[XR.id]=res.room;
       closeBSheet(xrSheet);
       if(curPage==='rooms')renderRooms(true);
       if(roomDetail.classList.contains('open')&&curRoom&&curRoom.id===res.room.id){curRoom=res.room;buildRoom(res.room)}
       showToast('Room updated ✅');purgePhotos(res.removed).catch(()=>{});XR=null;
     }catch(e){err.textContent=epErr(e);btn.disabled=false}
+    finally{btn.textContent='Save changes'}
   });
   async function deleteRoom(r){
     const ok=await confirmBox({title:'Delete this room?',text:'The listing and all its photos will be deleted for good.',ok:'Delete room'});
@@ -1536,12 +1569,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function openEditProduct(p){
     if(!p||!p.mine)return;
-    XQ={id:p.id,photos:p.photos.filter(isU),removed:[],cat:p.category,cond:p.condition,neg:!!p.negotiable};
+    XQ={id:p.id,max:6,photos:p.photos.filter(isU).map(u=>({u})),removed:[],cat:p.category,cond:p.condition,neg:!!p.negotiable};
     $('#xqTitle').value=p.title;$('#xqPrice').value=rfmt(p.price);$('#xqLoc').value=p.location||'';$('#xqDesc').value=p.description;$('#xqDescN').textContent=p.description.length+'/2000';
     $('#xqErr').textContent='';$('#xqSave').disabled=false;xqPaint();epPhotos(XQ,$('#xqPhotos'),$('#xqPhNote'));openBSheet(xqSheet);
   }
   xqSheet.addEventListener('click',e=>{
     if(e.target.closest('.bs-back,.bs-close')){closeBSheet(xqSheet);return}
+    if(e.target.closest('[data-padd]')){$('#xqFile').click();return}
     const rm=e.target.closest('[data-prm]');if(rm){epDropPhoto(XQ,+rm.dataset.prm,$('#xqPhotos'),$('#xqPhNote'));return}
     if(e.target.closest('#xqNeg')){XQ.neg=!XQ.neg;xqPaint();return}
     const gv=e.target.closest('[data-gv]');if(!gv)return;
@@ -1553,16 +1587,185 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#xqSave').addEventListener('click',async()=>{
     if(!XQ)return;const btn=$('#xqSave'),err=$('#xqErr');err.textContent='';btn.disabled=true;
     try{
+      if(XQ.photos.some(x=>x.blob))btn.textContent='Uploading…';
+      const urls=await epUpload(XQ);
       const res=await rpc('update_product',{p_product:XQ.id,p_title:$('#xqTitle').value,p_category:XQ.cat,p_condition:XQ.cond,p_price:+($('#xqPrice').value.replace(/\D/g,'')||0),
-        p_negotiable:XQ.neg,p_description:$('#xqDesc').value,p_location:$('#xqLoc').value.trim()||null,p_photos:XQ.photos});
+        p_negotiable:XQ.neg,p_description:$('#xqDesc').value,p_location:$('#xqLoc').value.trim()||null,p_photos:urls});
+      trashDrop(urls);
       closeBSheet(xqSheet);setProduct(res.product);showToast('Product updated ✅');purgePhotos(res.removed).catch(()=>{});XQ=null;
     }catch(e){err.textContent=epErr(e);btn.disabled=false}
+    finally{btn.textContent='Save changes'}
   });
   document.addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
     if(xrSheet.classList.contains('open'))closeBSheet(xrSheet);
     else if(xqSheet.classList.contains('open'))closeBSheet(xqSheet);
   });
+
+  // =====================================================================
+  // MESSAGES (/messages = your chats, /messages/<id> = one chat)
+  // New messages arrive by asking the server every few seconds (poll_messages). The chat you are looking at updates at once;
+  // anywhere else the small red number on the message icon changes.
+  // =====================================================================
+  const MS={items:[],next:null,done:false,busy:false,started:false,seq:0};
+  let MMAX=null,CH=null,mTick=0,chTmp=0;
+  const chatView=$('#chatView'),msList=$('#msList'),msScroll=$('#msScroll'),chScroll=$('#chScroll'),chBody=$('#chBody'),chInput=$('#chInput');
+  const isChatOpen=()=>chatView.classList.contains('open');
+  // the newest thing opened sits on top, whatever order things were opened in
+  function raiseOv(el){const n=[roomDetail,prodDetail,chatView].filter(x=>x!==el&&x.classList.contains('open')).length;el.style.zIndex=String(92+n)}
+  function paintMsgBadge(n){
+    n=n||0;const t=n>99?'99+':String(n),d=$('#msgDot');
+    if(d){d.textContent=t;d.style.display=n?'grid':'none'}
+    const s=$('#sideMsgDot');if(s){s.textContent=t;s.style.display=n?'grid':'none'}
+  }
+  function convHTML(c){
+    const o=c.other;
+    return '<button type="button" class="ms-row'+(c.unread?' unread':'')+'" data-conv="'+c.id+'"><span class="avatar"><img src="'+FACE(o.avatar)+'" alt="" onerror="this.remove()"></span>'+
+      '<span class="ms-main"><b>'+esc(o.name)+(o.verified?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>'+(c.mine?'You: ':'')+esc(c.last||'')+'</small></span>'+
+      '<span class="ms-meta"><time>'+esc(c.ago||'')+'</time>'+(c.unread?'<i class="ms-dot"></i>':'')+'</span></button>';
+  }
+  function paintMsList(){
+    msList.innerHTML=MS.items.map(convHTML).join('');
+    $('#msEmpty').hidden=!(MS.done&&!MS.items.length&&!MS.busy);
+    $('#msMore').hidden=!(MS.busy||(MS.started&&!MS.done));
+  }
+  function rememberConv(list){list.forEach(c=>{HANDLES[c.other.id]=c.other.handle;PNAME[c.other.id]=c.other.name})}
+  function loadConvs(reset){
+    if(reset){MS.items=[];MS.next=null;MS.done=false;MS.busy=false;MS.seq++}
+    if(MS.busy||MS.done)return Promise.resolve();
+    MS.busy=true;MS.started=true;paintMsList();
+    const seq=MS.seq,cur=MS.next;
+    return rpc('get_conversations',{p_limit:20,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null}).then(r=>{
+      if(seq!==MS.seq)return;
+      rememberConv(r.items);
+      MS.items.push(...r.items.filter(x=>!MS.items.some(y=>y.id===x.id)));MS.next=r.next||null;MS.done=!r.next;paintMsgBadge(r.unread);
+    }).catch(()=>{if(seq===MS.seq){MS.done=true;fail('Could not load your messages')}}).finally(()=>{if(seq===MS.seq){MS.busy=false;paintMsList()}});
+  }
+  // fetch the newest chats again without clearing the list (so it does not flicker)
+  function refreshConvs(){
+    if(MS.busy)return Promise.resolve();
+    const seq=++MS.seq;MS.busy=true;
+    return rpc('get_conversations',{p_limit:20}).then(r=>{
+      if(seq!==MS.seq)return;
+      rememberConv(r.items);MS.items=r.items;MS.next=r.next||null;MS.done=!r.next;MS.started=true;paintMsgBadge(r.unread);
+    }).catch(()=>{}).finally(()=>{if(seq===MS.seq){MS.busy=false;paintMsList()}});
+  }
+  function renderMessages(){
+    if(!MS.started)loadConvs(true);else refreshConvs();
+    msScroll.scrollTop=0;
+  }
+  infinite($('#msMore'),msScroll,()=>curPage==='messages'&&MS.started&&!MS.done&&!MS.busy,()=>loadConvs());
+  msList.addEventListener('click',e=>{const r=e.target.closest('[data-conv]');if(r)openChat(r.dataset.conv)});
+  function openMessages(){
+    if(curPage==='messages')return;
+    prevPage=curPage;setPage('messages');
+    try{history.pushState(null,'','/messages');navDepth++}catch(e){}
+  }
+  function backFromMessages(){
+    if(navDepth>0){history.back();return}
+    const to=prevPage==='messages'||prevPage==='profile'?'home':prevPage;
+    setPage(to);try{history.pushState(null,'',pageUrl(to))}catch(e){}
+  }
+  $('#msBack').addEventListener('click',backFromMessages);
+  $('#msgBtn').addEventListener('click',openMessages);
+
+  // ---- one chat ----
+  const dayLabel=d=>{const t=new Date(),y=new Date(Date.now()-864e5),s=x=>x.toDateString();return s(d)===s(t)?'Today':s(d)===s(y)?'Yesterday':d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:d.getFullYear()===t.getFullYear()?undefined:'numeric'})};
+  const clock=d=>d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  function msgHTML(m,prev){
+    const d=new Date(m.at),pd=prev&&new Date(prev.at);let h='';
+    if(!prev||pd.toDateString()!==d.toDateString())h+='<div class="ch-day"><span>'+dayLabel(d)+'</span></div>';
+    if(m.topic&&(!prev||!prev.topic||prev.topic.id!==m.topic.id))h+='<button type="button" class="ch-topic'+(m.mine?' mine':'')+'" data-tk="'+m.topic.kind+'" data-tid="'+esc(m.topic.id)+'"><i class="fa-solid '+(m.topic.kind==='room'?'fa-bed':'fa-bag-shopping')+'"></i><span>'+esc(m.topic.title)+'</span><i class="fa-solid fa-chevron-right"></i></button>';
+    h+='<div class="ch-m '+(m.mine?'mine':'them')+(m.pending?' pending':'')+'" data-mid="'+m.id+'"><span class="tx">'+esc(m.body)+'</span><time>'+(m.pending?'Sending…':clock(d))+'</time></div>';
+    return h;
+  }
+  function chRender(stick){
+    const old=chScroll.scrollHeight-chScroll.scrollTop,st=chScroll.scrollTop;
+    chBody.innerHTML=(CH.more?'<button type="button" class="ch-more" data-act="older">Load earlier messages</button>':'')+
+      (CH.msgs.length?CH.msgs.map((m,i)=>msgHTML(m,CH.msgs[i-1])).join(''):'<div class="ch-empty">Say hello 👋</div>');
+    if(stick==='bottom')chScroll.scrollTop=chScroll.scrollHeight;
+    else if(stick==='keep')chScroll.scrollTop=chScroll.scrollHeight-old;
+    else chScroll.scrollTop=st;
+  }
+  function chInputFit(){chInput.style.height='auto';chInput.style.height=Math.min(chInput.scrollHeight,120)+'px';$('#chSend').disabled=!chInput.value.trim()}
+  function openChat(id,noPush){
+    if(CH&&CH.conv===id&&isChatOpen())return Promise.resolve();
+    return rpc('get_messages',{p_conv:id,p_limit:30}).then(r=>{
+      if(!r){showToast('That chat is not available');ovMissing();return}
+      CH={conv:id,other:r.other,msgs:r.messages,more:r.more,canWrite:r.canWrite};
+      HANDLES[r.other.id]=r.other.handle;PNAME[r.other.id]=r.other.name;
+      $('#chAv').src=FACE(r.other.avatar);$('#chName').textContent=r.other.name;$('#chSub').textContent=r.other.role+(r.other.verified?' · Verified':'');
+      $('#chNote').hidden=r.canWrite;$('#chBar').hidden=!r.canWrite;
+      chInput.value='';chInputFit();chRender('bottom');
+      raiseOv(chatView);chatView.classList.add('open');chatView.setAttribute('aria-hidden','false');
+      setTimeout(()=>{if(CH&&CH.conv===id)chScroll.scrollTop=chScroll.scrollHeight},80);
+      paintMsgBadge(r.unread);
+      const it=MS.items.find(x=>x.id===id);if(it&&it.unread){it.unread=false;paintMsList()}
+      if(!noPush)ovPush('/messages/'+id);
+      if(isWide()&&r.canWrite)setTimeout(()=>chInput.focus(),120);
+    }).catch(()=>{fail('Could not open that chat');ovMissing()});
+  }
+  function closeChat(){
+    chatView.classList.remove('open');chatView.setAttribute('aria-hidden','true');
+    if(curPage==='messages')refreshConvs();
+  }
+  // start (or continue) a chat with someone and open it; `o` can carry a first message about a room or product
+  function openChatWith(pid,o){
+    o=o||{};
+    return rpc('start_conversation',{p_with:pid,p_body:o.body||null,p_kind:o.kind||null,p_topic:o.topic||null}).then(r=>{
+      HANDLES[r.other.id]=r.other.handle;PNAME[r.other.id]=r.other.name;
+      return openChat(r.conv).then(()=>r);
+    });
+  }
+  $('#chBack').addEventListener('click',()=>ovBack(closeChat));
+  $('#chWho').addEventListener('click',()=>{if(!CH)return;const h=CH.other.handle;ovBack(closeChat);setTimeout(()=>openProfile(h),60)});
+  chInput.addEventListener('input',chInputFit);
+  chInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&isWide()){e.preventDefault();if(chInput.value.trim())$('#chBar').requestSubmit()}});
+  $('#chBar').addEventListener('submit',e=>{e.preventDefault();sendChat()});
+  function sendChat(){
+    const body=chInput.value.trim();if(!body||!CH)return;
+    const cv=CH,tmp={id:'t'+(++chTmp),mine:true,body,at:new Date().toISOString(),pending:true};
+    cv.msgs.push(tmp);chInput.value='';chInputFit();chRender('bottom');
+    rpc('send_message',{p_conv:cv.conv,p_body:body}).then(m=>{
+      const i=cv.msgs.findIndex(x=>x.id===tmp.id);
+      if(cv.msgs.some(x=>x.id===m.id)){if(i>-1)cv.msgs.splice(i,1)}else if(i>-1)cv.msgs[i]=m;
+      if(CH===cv)chRender('bottom');
+      if(curPage==='messages')refreshConvs();
+    }).catch(e=>{
+      const i=cv.msgs.findIndex(x=>x.id===tmp.id);if(i>-1)cv.msgs.splice(i,1);
+      if(CH===cv){chRender();chInput.value=body;chInputFit()}
+      fail(epErr(e));
+    });
+  }
+  chBody.addEventListener('click',e=>{
+    const t=e.target.closest('[data-tk]');
+    if(t){t.dataset.tk==='room'?openRoomById(t.dataset.tid):openProductById(t.dataset.tid);return}
+    if(e.target.closest('[data-act=older]')&&CH){
+      const first=CH.msgs.find(m=>typeof m.id==='number');if(!first)return;
+      const cv=CH;
+      rpc('get_messages',{p_conv:cv.conv,p_limit:30,p_before:first.id}).then(r=>{if(CH!==cv)return;cv.msgs=r.messages.concat(cv.msgs);cv.more=r.more;chRender('keep')}).catch(()=>fail('Could not load more'));
+    }
+  });
+
+  // ---- new messages ----
+  function pollMsgs(){
+    return rpc('poll_messages',{p_after:MMAX==null?9e15:MMAX}).then(r=>{
+      if(MMAX==null){MMAX=r.maxId;paintMsgBadge(r.unread);return}
+      if(r.maxId>MMAX)MMAX=r.maxId;
+      let fresh=0,live=false;
+      const near=chScroll.scrollHeight-chScroll.scrollTop-chScroll.clientHeight<140;
+      r.items.forEach(m=>{
+        if(CH&&isChatOpen()&&m.conv===CH.conv){if(!CH.msgs.some(x=>x.id===m.id)){CH.msgs.push(m);live=true}}
+        else if(!m.mine)fresh++;
+      });
+      if(live){chRender(near?'bottom':undefined);rpc('mark_conversation_read',{p_conv:CH.conv}).then(paintMsgBadge).catch(()=>{})}
+      else paintMsgBadge(r.unread);
+      if(fresh)showToast('💬 New message');
+      if(r.items.length&&curPage==='messages')refreshConvs();
+    }).catch(()=>{});
+  }
+  setInterval(()=>{mTick++;if(document.hidden)return;if(isChatOpen()||curPage==='messages'||mTick%4===0)pollMsgs()},5000);
+  pollMsgs();
 
   // ---- new post: see CREATE A POST below ----
   function postHTML(p){
@@ -1637,7 +1840,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function profileTabs(p){
     const tabs=[['posts','Posts',p.posts]];
     const rooms=roomsOf(p);
-    if(rooms.length)tabs.push(['rooms','Rooms',rooms.length]);
+    if(rooms.length||(p.isMe&&isLandlord()))tabs.push(['rooms','Rooms',rooms.length]);
+    tabs.push(['products','Products',p._prods?p._prods.length:'']);
     if(p.isMe)tabs.push(['saved','Saved',saved.size]);
     return tabs;
   }
@@ -1660,7 +1864,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       '<div class="pf-cover"'+cover+'></div>'+
       '<div class="pf-card"><div class="pf-avrow"><div class="avatar pf-av"><img src="'+FACE(p.avatar)+'" alt="'+esc(p.name)+'" onerror="this.remove()"></div><div class="pf-actions">'+actions+'</div></div>'+
       '<h1 class="pf-name">'+esc(p.name)+(p.verified?'<i class="fa-solid fa-circle-check"></i>':'')+'</h1>'+
-      '<div class="pf-handle">@'+esc(p.handle)+(p.private?' <i class="fa-solid fa-lock" title="Private account"></i>':'')+'<span class="pf-role'+(p.role==='Landlord'?' landlord':'')+'">'+esc(p.role)+'</span></div>'+
+      '<div class="pf-handle">@'+esc(p.handle)+(p.private?' <i class="fa-solid fa-lock" title="Private account"></i>':'')+'<span class="pf-role'+(p.role!=='Student'?' landlord':'')+'">'+esc(p.role)+'</span></div>'+
       (p.bio?'<p class="pf-bio">'+esc(p.bio)+'</p>':'<p class="pf-bio empty">'+(p.isMe?'Add a bio so people know who you are.':'No bio yet.')+'</p>')+
       '<div class="pf-meta">'+meta.join('')+'</div>'+
       '<div class="pf-stats"><button type="button" data-st="posts"><b id="pfStPosts">'+countTxt(p.posts)+'</b><small>Posts</small></button>'+
@@ -1692,6 +1896,22 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       paintPfMore();
       return;
     }
+    if(pfTab==='products'){
+      list.className='pf-rooms';
+      if(!p._prods){
+        list.innerHTML='<div class="pf-empty"><span class="more-sp"></span></div>';
+        if(!p._prodsLoading){
+          p._prodsLoading=true;
+          rpc('get_profile_products',{p_profile:p.id}).then(l=>{p._prods=l;l.forEach(x=>{DETPROD[x.id]=x})}).catch(()=>{p._prods=[];fail('Could not load products')})
+            .finally(()=>{p._prodsLoading=false;if(curProfile===p&&pfTab==='products')renderPfList()});
+        }
+        return;
+      }
+      const tc=$('#pfTabs .tab[data-pt="products"] .tc');if(tc)tc.textContent=p._prods.length;
+      list.innerHTML=p._prods.length?'<div class="rm-grid">'+p._prods.map((x,i)=>prodCardHTML(x,i)).join('')+'</div>'
+        :'<div class="pf-empty"><div class="s-emoji">🛍️</div><b>'+(p.isMe?'You have not listed anything':'Nothing for sale')+'</b>'+(p.isMe?'<button type="button" class="rm-clear" data-pf="sell">Sell a product</button>':'')+'</div>';
+      return;
+    }
     if(ROOMSNEXT)loadAllRooms().then(()=>{if(curProfile===p&&pfTab!=='posts')renderPfList()}).catch(()=>{});
     const rooms=pfTab==='rooms'?roomsOf(p):ROOMS.filter(r=>saved.has(r.id));
     list.className='pf-rooms';
@@ -1704,7 +1924,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     }
     list.innerHTML=rooms.length?'<div class="rm-grid">'+rooms.map((r,i)=>cardHTML(r,i,false)).join('')+'</div>'
       :'<div class="pf-empty"><div class="s-emoji">'+(pfTab==='saved'?'❤️':'🏠')+'</div><b>'+(pfTab==='saved'?'No saved rooms':'No rooms listed')+'</b>'+
-       (pfTab==='saved'?'Tap the heart on any room to keep it here.':esc(p.name.split(' ')[0])+' has no rooms listed yet.')+'</div>';
+       (pfTab==='saved'?'Tap the heart on any room to keep it here.':p.isMe?'List your first room so students can find it.<br><button type="button" class="rm-clear" data-pf="listroom">List a room</button>':esc(p.name.split(' ')[0])+' has no rooms listed yet.')+'</div>';
   }
   function paintPfEmpty(p){
     const pp=p._pp;if(!pp)return;
@@ -1769,7 +1989,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function goHomeFromProfile(){setPage('home');try{history.replaceState(null,'','/')}catch(e){}}
   function backFromProfile(){
     if(navDepth>0){history.back();return}
-    setPage(prevPage==='profile'?'home':prevPage);try{history.pushState(null,'',prevPage==='rooms'?'/rooms':'/')}catch(e){}
+    setPage(prevPage==='profile'?'home':prevPage);try{history.pushState(null,'',pageUrl(prevPage==='profile'?'home':prevPage))}catch(e){}
   }
 
   // ---- desktop: the right column of a profile (about, links, photos, rooms, people to link with) ----
@@ -1782,7 +2002,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     // about
     const facts=[];
     if(p.area)facts.push('<li><i class="fa-solid fa-location-dot"></i><span>Lives in <b>'+esc(p.area)+'</b></span></li>');
-    facts.push('<li><i class="fa-solid '+(p.role==='Landlord'?'fa-building':'fa-graduation-cap')+'"></i><span>'+esc(p.role)+(p.verified?' · <b class="ok">Verified</b>':'')+'</span></li>');
+    facts.push('<li><i class="fa-solid '+(p.role==='Landlord'?'fa-building':p.role==='Commissioner'?'fa-handshake':'fa-graduation-cap')+'"></i><span>'+esc(p.role)+(p.verified?' · <b class="ok">Verified</b>':'')+'</span></li>');
     facts.push('<li><i class="fa-regular fa-calendar"></i><span>'+esc(p.joined)+'</span></li>');
     if(p.private)facts.push('<li><i class="fa-solid fa-lock"></i><span>Private account</span></li>');
     h+='<section class="r-card r-about"><h3>About '+(p.isMe?'you':esc(first))+'</h3>'+
@@ -1812,6 +2032,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function pfClick(e){
     if(e.target.closest('.post'))return feedClick(e);
     if(heartClick(e))return;
+    const pc=e.target.closest('[data-prod]');if(pc){openProduct(pc.dataset.prod);return}
     const rc=e.target.closest('.rcard');if(rc){openRoom(rc.dataset.room);return}
     const tab=e.target.closest('#pfTabs .tab');if(tab){pfTab=tab.dataset.pt;renderPfList();return}
     const st=e.target.closest('[data-st]');if(st){
@@ -1824,12 +2045,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(act==='edit')openEdit();
     else if(act==='compose')openCreate();
     else if(act==='settings')openSettings();
-    else if(act==='message')showToast('Messages are coming soon 💬');
+    else if(act==='message'){if(curProfile)openChatWith(curProfile.id).catch(e=>fail(epErr(e)))}
+    else if(act==='sell')openCreate('product');
+    else if(act==='listroom')openCreate('room');
     else if(act==='more')openProfileMenu(a);
   }
   pfBody.addEventListener('click',pfClick);
   $('#sUser').addEventListener('click',()=>openProfile(ME.handle));
-  $('#topMe').addEventListener('click',()=>openProfile(ME.handle));
 
   // ---- Links / Linking list ----
   let lsKind='links';
@@ -1895,12 +2117,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     HANDLES[ME.id]=p.handle;PNAME[ME.id]=p.name;
     if(SET){SET.name=p.name;SET.handle=p.handle;SET.avatar=p.avatar;SET.role=p.role}
     $('#sUserName').textContent=p.name;$('#sUserSub').textContent=p.role+(p.area?' · '+p.area:'');
-    [$('#sUserAv'),$('#topMeAv')].forEach(i=>{if(i){i.style.display='';i.src=FACE(p.avatar)}});
+    [$('#sUserAv'),$('.nav-av img')].forEach(i=>{if(i){i.style.display='';i.src=FACE(p.avatar)}});
     $$('.post[data-author="'+ME.id+'"]').forEach(a=>{
       const im=$('.avatar img',a);if(im){im.style.display='';im.src=FACE(p.avatar);im.alt=p.name}
       const au=$('.author',a);if(au)au.childNodes[0].textContent=p.name+' ';
       const em=$('.author em',a);if(em)em.textContent='('+p.role+')';
-      const mt=$('.meta',a);if(mt&&mt.firstChild&&mt.firstChild.nodeType===3)mt.firstChild.textContent=mt.firstChild.textContent.replace(/^(Student|Landlord)/,p.role);
+      const mt=$('.meta',a);if(mt&&mt.firstChild&&mt.firstChild.nodeType===3)mt.firstChild.textContent=mt.firstChild.textContent.replace(/^(Student|Landlord|Commissioner)/,p.role);
     });
     Object.keys(COMMENTS).forEach(k=>COMMENTS[k].forEach(c=>{if(c.mine)c.av=p.avatar;c.replies.forEach(r=>{if(r.mine)r.av=p.avatar})}));
     ROOMS.forEach(r=>{if(r.ll.id===ME.id){r.ll.name=p.name;r.ll.av=p.avatar;r.llk=p.handle}});
@@ -1934,7 +2156,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   })});
 
   // browser back / forward and deep links
-  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':location.pathname.indexOf('/market')===0?'market':location.pathname.indexOf('/create')===0?'create':'home';
+  const pagePath=()=>location.pathname.indexOf('/profile')===0?'profile':location.pathname.indexOf('/settings')===0?'settings':location.pathname.indexOf('/rooms')===0?'rooms':location.pathname.indexOf('/market')===0?'market':location.pathname.indexOf('/messages')===0?'messages':location.pathname.indexOf('/create')===0?'create':'home';
   // what is open on top, according to the address
   function syncOverlays(){
     URLSYNC=true;
@@ -1948,6 +2170,9 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       const m3=p.match(/^\/market\/([0-9a-f-]{36})$/),mid=m3&&m3[1];
       if(mid){if(!(prodDetail.classList.contains('open')&&curProd&&curProd.id===mid))openProductById(mid,true)}
       else if(prodDetail.classList.contains('open'))closeProduct();
+      const m4=p.match(/^\/messages\/([0-9a-f-]{36})$/),cid=m4&&m4[1];
+      if(cid){if(!(isChatOpen()&&CH&&CH.conv===cid))openChat(cid,true)}
+      else if(isChatOpen())closeChat();
       if(p==='/notifications'){if(!sNotif.classList.contains('open'))openNotifs()}
       else if(sNotif.classList.contains('open'))closeSheets();
       if(p==='/search'){if(!sSearch.classList.contains('open'))openSearch()}
@@ -1990,7 +2215,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const CR_TAGS={room:['singleroom','sharedroom','deposit','wifi','nearcampus'],tip:['studytips','budget','transport','food','wifi'],price:['food','transport','market','rent','cheap'],question:['help','rooms','study','safety','transport'],event:['campus','study','meetup','free','weekend']};
   const CR_AUD={everyone:['fa-earth-africa','Everyone','Everyone on Ghetto'],links:['fa-user-group','Linked','Only people you link with']};
   let CR_MAX=6;const CRK='ghetto.draft.'+ME.id,CR_MAXES={post:6,room:8,product:6};
-  const isLandlord=()=>ME.role==='Landlord';
+  function isLandlord(){return ME.role==='Landlord'||ME.role==='Commissioner'}
   const RM_TYPES=[['single','Single room','fa-bed'],['shared','Shared room','fa-user-group'],['house','House','fa-house'],['apartment','Apartment','fa-building']];
   const RM_BATH=['Private','Shared'],RM_DEP=['None','1 month','2 months','3 months'],RM_MIN=['1 month','3 months','6 months','12 months'];
   const PD_CATS=[['electronics','Electronics','fa-laptop'],['furniture','Furniture','fa-couch'],['books','Books','fa-book'],['clothes','Clothes','fa-shirt'],['kitchen','Kitchen','fa-utensils'],['transport','Transport','fa-bicycle'],['other','Other','fa-box']];
@@ -2044,7 +2269,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       return '<button type="button" role="radio" class="cr-kind'+(CR.kind===k?' on':'')+(lock?' locked':'')+'" data-kind="'+k+'" aria-checked="'+(CR.kind===k)+'"><i class="fa-solid '+KIND_DEF[k][0]+'"></i>'+KIND_DEF[k][1]+(lock?'<em class="fa-solid fa-lock"></em>':'')+'</button>'}).join('');
     const n=$('#crKindNote');
     n.hidden=false;
-    n.textContent=CR.kind==='post'&&!isLandlord()?'Shown in the feed. Room listings are for landlords. You can still write a post about a room.':KIND_DEF[CR.kind][2];
+    n.textContent=CR.kind==='post'&&!isLandlord()?'Shown in the feed. Room listings are for landlords and commissioners. You can still write a post about a room.':KIND_DEF[CR.kind][2];
   }
   function chips(g,list,cur,multi){
     return list.map(x=>{const on=multi?cur.indexOf(x[0])>-1:cur===x[0];
@@ -2211,7 +2436,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   function crSetKind(k){
     if(k===CR.kind)return;
-    if(k==='room'&&!isLandlord()){showToast('Room listings are for landlords. Write a post about the room instead 🏠');return}
+    if(k==='room'&&!isLandlord()){showToast('Room listings are for landlords and commissioners. Write a post about the room instead 🏠');return}
     CR.kind=k;
     const max=CR_MAXES[k];
     while(CR.photos.length>max){const t=CR.photos.pop();crDropPhoto(t)}
@@ -2241,7 +2466,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function backFromCreate(){
     if(navDepth>0){history.back();return}
     const to=prevPage==='create'?'home':prevPage;
-    setPage(to);try{history.pushState(null,'',to==='rooms'?'/rooms':to==='profile'&&curProfile?profPath(curProfile.handle):'/')}catch(e){}
+    setPage(to);try{history.pushState(null,'',to==='profile'&&curProfile?profPath(curProfile.handle):pageUrl(to))}catch(e){}
   }
   function crReset(removeFiles){
     CR.photos.forEach(t=>crDropPhoto(t,!removeFiles));
@@ -2291,7 +2516,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   function crAfterProduct(p){
     crFinish();
-    DETPROD[p.id]=p;MK.cat='all';MK.mine=false;MK.q='';MK.started=false;
+    DETPROD[p.id]=p;pfProdsDirty();MK.cat='all';MK.mine=false;MK.q='';MK.started=false;
     setPage('market');try{history.replaceState(null,'','/market');if(navDepth>0)navDepth--}catch(e){}
     setTimeout(()=>openProduct(p.id),250);
     showToast('Product listed 🛍️');
@@ -2384,6 +2609,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
 
   if(curPage==='market')renderMarket();
+  if(curPage==='messages')renderMessages();
 
   // =====================================================================
   // THREE-DOT MENUS, EDIT / REPORT / DELETE, AND KEEPING STORAGE CLEAN
@@ -2836,7 +3062,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function backFromSettings(){
     if(navDepth>0){history.back();return}
     const to=prevPage==='settings'||prevPage==='profile'?'home':prevPage;
-    setPage(to);try{history.pushState(null,'',to==='rooms'?'/rooms':'/')}catch(e){}
+    setPage(to);try{history.pushState(null,'',pageUrl(to))}catch(e){}
   }
 
   function saveSetting(k,v){
