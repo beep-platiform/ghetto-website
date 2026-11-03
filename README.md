@@ -148,3 +148,16 @@ Database: `supabase/migrations/0011_listings.sql` (already applied to the projec
 - **Commissioner:** a third role (sign-up, Edit profile). Landlords and commissioners can list rooms; everyone can sell products.
 - **Profile:** new **Products** tab on every profile (own profile also shows a **Rooms** tab for landlords/commissioners). Editing a room or product can now add photos as well as remove them.
 - Database: `supabase/migrations/0012_messages_commissioner.sql` (already applied).
+
+## Messaging upgrade (migration 0013)
+
+Run `supabase/migrations/0013_messaging_plus.sql` (and the small fix `0013b_poll_fix`, already merged into the file) in the SQL editor.
+
+- Ticks: clock (sending), ✓ sent, ✓✓ delivered, blue ✓✓ read; a failed message shows "Not sent · tap to retry".
+- Tap a bubble: Reply, Copy, Edit (15 minutes), Delete for me, Unsend (removed for both, photo file deleted), Report message.
+- Chat list: search (people and message text), filters (All, Unread, Rooms, Products, Requests, Archived), pin, mute, archive, mark as unread, delete chat.
+- Requests: someone you are not linked with lands in Requests until you accept or reply.
+- Safety: block/unblock (chat menu, Settings > Messages > Blocked people), report message or person.
+- Settings > Messages: read receipts, last active, sounds (turning receipts or last active off hides them both ways).
+- Business: quick replies (saved on the device), "Mark as sold" strip in a product chat, send a photo, "Send in a chat" in the room and product menus.
+- Live: the open chat asks the server every 2 s (the chat list every 5 s, elsewhere every 20 s). Push or email alerts when the app is closed need a separate sending service and are not included.

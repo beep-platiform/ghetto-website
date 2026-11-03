@@ -1444,6 +1444,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     }
     it.push({icon:'fa-link',t:'Copy link',fn:()=>copyText(link,'Product link copied 🔗')});
     if(canShare)it.push({icon:'fa-share-nodes',t:'Share…',fn:()=>shareLink(link,p.title)});
+    it.push({icon:'fa-paper-plane',t:'Send in a chat',fn:()=>openShare('product',p.id,p.title)});
     if(p.mine)it.push({icon:'fa-trash',t:'Delete product',s:'Also deletes its photos',danger:true,fn:()=>deleteProduct(p)});
     else{
       it.push({icon:'fa-user',t:'View seller',fn:()=>{const h=p.seller.handle;ovBack(closeProduct);setTimeout(()=>openProfile(h),50)}});
@@ -1604,12 +1605,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
 
   // =====================================================================
   // MESSAGES (/messages = your chats, /messages/<id> = one chat)
-  // New messages arrive by asking the server every few seconds (poll_messages). The chat you are looking at updates at once;
-  // anywhere else the small red number on the message icon changes.
+  // The server is asked for news every 2 seconds while a chat is open, every 5 seconds on the chat list and every 20 seconds elsewhere.
+  // That drives the ticks, "typing...", edits and unsent messages, and the red number on the message icon.
   // =====================================================================
-  const MS={items:[],next:null,done:false,busy:false,started:false,seq:0};
-  let MMAX=null,CH=null,mTick=0,chTmp=0;
+  const MS={items:[],next:null,done:false,busy:false,started:false,seq:0,filter:'all',q:'',res:null,rseq:0,counts:{requests:0,archived:0,unread:0}};
+  let MMAX=null,CH=null,chTmp=0,CHSIG='',lastTyping=0,MSET={read_receipts:true,show_last_active:true,sounds:true};
   const chatView=$('#chatView'),msList=$('#msList'),msScroll=$('#msScroll'),chScroll=$('#chScroll'),chBody=$('#chBody'),chInput=$('#chInput');
+  const qrSheet=$('#qrSheet'),shSheet=$('#shSheet'),blSheet=$('#blSheet');
   const isChatOpen=()=>chatView.classList.contains('open');
   // the newest thing opened sits on top, whatever order things were opened in
   function raiseOv(el){const n=[roomDetail,prodDetail,chatView].filter(x=>x!==el&&x.classList.contains('open')).length;el.style.zIndex=String(92+n)}
@@ -1618,44 +1620,125 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(d){d.textContent=t;d.style.display=n?'grid':'none'}
     const s=$('#sideMsgDot');if(s){s.textContent=t;s.style.display=n?'grid':'none'}
   }
+  rpc('get_message_settings').then(s=>{MSET=s;if(curPage==='settings')renderSettings()}).catch(()=>{});
+  [qrSheet,shSheet,blSheet].forEach(s=>s.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(s)}));
+  // a short "blip" for a new message (if sounds are on)
+  let actx=null;
+  function blip(){
+    if(!MSET.sounds)return;
+    try{
+      actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+      const o=actx.createOscillator(),g=actx.createGain();o.type='sine';o.frequency.value=880;
+      g.gain.setValueAtTime(.0001,actx.currentTime);g.gain.exponentialRampToValueAtTime(.12,actx.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,actx.currentTime+.18);
+      o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+.2);
+    }catch(e){}
+  }
+
+  // ---------- the list of chats ----------
+  const MS_FILTERS=[['all','All'],['unread','Unread'],['rooms','Rooms'],['products','Products'],['requests','Requests'],['archived','Archived']];
+  function paintChips(){
+    $('#msChips').innerHTML=MS_FILTERS.map(f=>{
+      const n=f[0]==='unread'?MS.counts.unread:f[0]==='requests'?MS.counts.requests:f[0]==='archived'?MS.counts.archived:0;
+      return '<button type="button" class="ms-chip'+(MS.filter===f[0]?' on':'')+'" data-f="'+f[0]+'">'+f[1]+(n?'<i>'+n+'</i>':'')+'</button>';
+    }).join('');
+  }
   function convHTML(c){
     const o=c.other;
-    return '<button type="button" class="ms-row'+(c.unread?' unread':'')+'" data-conv="'+c.id+'"><span class="avatar"><img src="'+FACE(o.avatar)+'" alt="" onerror="this.remove()"></span>'+
-      '<span class="ms-main"><b>'+esc(o.name)+(o.verified?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>'+(c.mine?'You: ':'')+esc(c.last||'')+'</small></span>'+
-      '<span class="ms-meta"><time>'+esc(c.ago||'')+'</time>'+(c.unread?'<i class="ms-dot"></i>':'')+'</span></button>';
+    const pv=c.match?esc(c.match):c.deleted?'<em>This message was unsent</em>':(c.photo&&!c.last)?'<i class="fa-regular fa-image"></i> Photo':esc(c.last||'');
+    return '<div class="ms-row'+(c.unread?' unread':'')+'" data-conv="'+c.id+'" role="button" tabindex="0"><span class="avatar"><img src="'+FACE(o.avatar)+'" alt="" onerror="this.remove()"></span>'+
+      '<span class="ms-main"><b>'+esc(o.name)+(o.verified?' <i class="fa-solid fa-circle-check"></i>':'')+'</b><small>'+(c.mine&&!c.match&&!c.deleted?'You: ':'')+pv+'</small></span>'+
+      '<span class="ms-meta"><time>'+esc(c.ago||'')+'</time><span class="ms-ic">'+(c.pinned?'<i class="fa-solid fa-thumbtack"></i>':'')+(c.muted?'<i class="fa-solid fa-bell-slash"></i>':'')+(c.unread?'<i class="ms-dot"></i>':'')+'</span></span>'+
+      '<button type="button" class="ms-more" data-rowmenu="'+c.id+'" aria-label="Chat options"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>';
   }
+  const EMPTY={all:['No messages yet','Message a landlord about a room, or a seller about a product, and the chat shows up here.'],unread:['No unread chats','You are all caught up 🎉'],rooms:['No room chats','Chats about rooms show up here.'],products:['No product chats','Chats about products show up here.'],
+    requests:['No message requests','People who are not linked with you wait here until you accept.'],archived:['Nothing archived','Archived chats are kept here. A new message brings a chat back.'],search:['No matches','Try a name or a word from the message.']};
   function paintMsList(){
-    msList.innerHTML=MS.items.map(convHTML).join('');
-    $('#msEmpty').hidden=!(MS.done&&!MS.items.length&&!MS.busy);
-    $('#msMore').hidden=!(MS.busy||(MS.started&&!MS.done));
+    paintChips();
+    const list=MS.res!==null?MS.res:MS.items;
+    msList.innerHTML=list.map(convHTML).join('');
+    const empty=!list.length&&(MS.res!==null||(MS.done&&!MS.busy));
+    $('#msEmpty').hidden=!empty;
+    if(empty){const e=EMPTY[MS.res!==null?'search':MS.filter];$('#msEmptyT').textContent=e[0];$('#msEmptyP').textContent=e[1]}
+    $('#msMore').hidden=MS.res!==null||!(MS.busy||(MS.started&&!MS.done));
   }
   function rememberConv(list){list.forEach(c=>{HANDLES[c.other.id]=c.other.handle;PNAME[c.other.id]=c.other.name})}
+  function takeCounts(r){if(r.counts)MS.counts=r.counts;paintMsgBadge(r.unread)}
   function loadConvs(reset){
     if(reset){MS.items=[];MS.next=null;MS.done=false;MS.busy=false;MS.seq++}
     if(MS.busy||MS.done)return Promise.resolve();
     MS.busy=true;MS.started=true;paintMsList();
     const seq=MS.seq,cur=MS.next;
-    return rpc('get_conversations',{p_limit:20,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null}).then(r=>{
+    return rpc('get_conversations',{p_limit:20,p_ts:cur?cur.ts:null,p_id:cur?cur.id:null,p_filter:MS.filter}).then(r=>{
       if(seq!==MS.seq)return;
       rememberConv(r.items);
-      MS.items.push(...r.items.filter(x=>!MS.items.some(y=>y.id===x.id)));MS.next=r.next||null;MS.done=!r.next;paintMsgBadge(r.unread);
+      MS.items.push(...r.items.filter(x=>!MS.items.some(y=>y.id===x.id)));MS.next=r.next||null;MS.done=!r.next;takeCounts(r);
     }).catch(()=>{if(seq===MS.seq){MS.done=true;fail('Could not load your messages')}}).finally(()=>{if(seq===MS.seq){MS.busy=false;paintMsList()}});
   }
   // fetch the newest chats again without clearing the list (so it does not flicker)
   function refreshConvs(){
     if(MS.busy)return Promise.resolve();
     const seq=++MS.seq;MS.busy=true;
-    return rpc('get_conversations',{p_limit:20}).then(r=>{
+    return rpc('get_conversations',{p_limit:20,p_filter:MS.filter}).then(r=>{
       if(seq!==MS.seq)return;
-      rememberConv(r.items);MS.items=r.items;MS.next=r.next||null;MS.done=!r.next;MS.started=true;paintMsgBadge(r.unread);
+      rememberConv(r.items);MS.items=r.items;MS.next=r.next||null;MS.done=!r.next;MS.started=true;takeCounts(r);
     }).catch(()=>{}).finally(()=>{if(seq===MS.seq){MS.busy=false;paintMsList()}});
   }
   function renderMessages(){
     if(!MS.started)loadConvs(true);else refreshConvs();
-    msScroll.scrollTop=0;
+    msScroll.scrollTop=0;pollLoop();
   }
-  infinite($('#msMore'),msScroll,()=>curPage==='messages'&&MS.started&&!MS.done&&!MS.busy,()=>loadConvs());
-  msList.addEventListener('click',e=>{const r=e.target.closest('[data-conv]');if(r)openChat(r.dataset.conv)});
+  infinite($('#msMore'),msScroll,()=>curPage==='messages'&&MS.res===null&&MS.started&&!MS.done&&!MS.busy,()=>loadConvs());
+  // search (people and message text)
+  let msT=null;
+  $('#msQ').addEventListener('input',e=>{
+    const q=e.target.value.trim();MS.q=q;$('#msQx').hidden=!e.target.value;clearTimeout(msT);
+    if(q.length<2){MS.res=null;MS.rseq++;paintMsList();return}
+    const rs=++MS.rseq;
+    msT=setTimeout(()=>rpc('search_conversations',{p_q:q}).then(r=>{if(rs!==MS.rseq)return;rememberConv(r);MS.res=r;paintMsList()}).catch(()=>{}),250);
+  });
+  $('#msQx').addEventListener('click',()=>{const i=$('#msQ');i.value='';i.dispatchEvent(new Event('input'));i.focus()});
+  $('#msChips').addEventListener('click',e=>{
+    const b=e.target.closest('[data-f]');if(!b||b.dataset.f===MS.filter)return;
+    MS.filter=b.dataset.f;loadConvs(true);msScroll.scrollTop=0;
+  });
+  // one switch of one chat (pin, mute, archive, unread, accept)
+  function convPref(id,key,val,msg){
+    return rpc('set_conv_pref',{p_conv:id,p_key:key,p_value:val}).then(()=>{
+      if(msg)showToast(msg);
+      if(CH&&CH.conv===id){const k={muted:'muted',pinned:'pinned',archived:'archived'}[key];if(k)CH.prefs[k]=val;if(key==='accepted'){CH.request=false;chPaintReq()}}
+      refreshConvs();
+    }).catch(()=>fail('Could not change that'));
+  }
+  async function deleteChat(id,name){
+    const ok=await confirmBox({title:'Delete this chat?',text:"It disappears from your side only. "+(name||'The other person')+" keeps their copy.",ok:'Delete chat'});
+    if(!ok)return;
+    try{
+      await rpc('delete_conversation',{p_conv:id});
+      if(CH&&CH.conv===id&&isChatOpen())ovBack(closeChat);
+      MS.items=MS.items.filter(x=>x.id!==id);if(MS.res)MS.res=MS.res.filter(x=>x.id!==id);
+      paintMsList();refreshConvs();showToast('Chat deleted 🗑️');
+    }catch(e){fail('Could not delete that chat')}
+  }
+  function convMenu(c,anchor){
+    const it=[];
+    if(c.request)it.push({icon:'fa-user-check',t:'Accept request',fn:()=>convPref(c.id,'accepted',true,'Request accepted ✅')});
+    else it.push({icon:'fa-thumbtack',t:c.pinned?'Unpin':'Pin to top',fn:()=>convPref(c.id,'pinned',!c.pinned,c.pinned?'Unpinned':'Pinned 📌')});
+    it.push({icon:c.muted?'fa-bell':'fa-bell-slash',t:c.muted?'Unmute':'Mute',s:c.muted?'':'No number on the message icon',fn:()=>convPref(c.id,'muted',!c.muted,c.muted?'Unmuted 🔔':'Muted')});
+    it.push({icon:c.archived?'fa-box-open':'fa-box-archive',t:c.archived?'Unarchive':'Archive',fn:()=>convPref(c.id,'archived',!c.archived,c.archived?'Moved back to your chats':'Archived 📦')});
+    it.push({icon:c.unread?'fa-envelope-open':'fa-envelope',t:c.unread?'Mark as read':'Mark as unread',fn:()=>{
+      if(c.unread)rpc('mark_conversation_read',{p_conv:c.id}).then(()=>refreshConvs()).catch(()=>fail('Could not change that'));
+      else convPref(c.id,'marked_unread',true)}});
+    it.push({icon:'fa-trash',t:'Delete chat',danger:true,fn:()=>deleteChat(c.id,c.other.name)});
+    openMenu(anchor,'',it);
+  }
+  const convOf=id=>(MS.res&&MS.res.find(x=>x.id===id))||MS.items.find(x=>x.id===id);
+  msList.addEventListener('click',e=>{
+    const m=e.target.closest('[data-rowmenu]');
+    if(m){const c=convOf(m.dataset.rowmenu);if(c)convMenu(c,m);return}
+    const r=e.target.closest('[data-conv]');if(r)openChat(r.dataset.conv);
+  });
+  msList.addEventListener('contextmenu',e=>{const r=e.target.closest('[data-conv]');if(!r)return;const c=convOf(r.dataset.conv);if(c){e.preventDefault();convMenu(c,r)}});
+  msList.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-conv]'))openChat(e.target.dataset.conv)});
   function openMessages(){
     if(curPage==='messages')return;
     prevPage=curPage;setPage('messages');
@@ -1669,44 +1752,112 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#msBack').addEventListener('click',backFromMessages);
   $('#msgBtn').addEventListener('click',openMessages);
 
-  // ---- one chat ----
+  // ---------- one chat ----------
   const dayLabel=d=>{const t=new Date(),y=new Date(Date.now()-864e5),s=x=>x.toDateString();return s(d)===s(t)?'Today':s(d)===s(y)?'Yesterday':d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:d.getFullYear()===t.getFullYear()?undefined:'numeric'})};
   const clock=d=>d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  function tickHTML(m){
+    if(m.failed)return '<i class="fa-solid fa-circle-exclamation tk err"></i>';
+    if(m.pending||typeof m.id!=='number')return '<i class="fa-regular fa-clock tk"></i>';
+    const p=CH&&CH.peer||{};
+    if(p.read!=null&&m.id<=p.read)return '<i class="fa-solid fa-check-double tk read"></i>';
+    if(p.deliv!=null&&m.id<=p.deliv)return '<i class="fa-solid fa-check-double tk"></i>';
+    return '<i class="fa-solid fa-check tk"></i>';
+  }
+  function replyHTML(r){
+    return '<div class="ch-q" data-qid="'+r.id+'"><b>'+(r.mine?'You':esc(CH?CH.other.name.split(' ')[0]:''))+'</b><span>'+(r.deleted?'This message was unsent':r.photo&&!r.body?'📷 Photo':esc(r.body))+'</span></div>';
+  }
   function msgHTML(m,prev){
     const d=new Date(m.at),pd=prev&&new Date(prev.at);let h='';
     if(!prev||pd.toDateString()!==d.toDateString())h+='<div class="ch-day"><span>'+dayLabel(d)+'</span></div>';
     if(m.topic&&(!prev||!prev.topic||prev.topic.id!==m.topic.id))h+='<button type="button" class="ch-topic'+(m.mine?' mine':'')+'" data-tk="'+m.topic.kind+'" data-tid="'+esc(m.topic.id)+'"><i class="fa-solid '+(m.topic.kind==='room'?'fa-bed':'fa-bag-shopping')+'"></i><span>'+esc(m.topic.title)+'</span><i class="fa-solid fa-chevron-right"></i></button>';
-    h+='<div class="ch-m '+(m.mine?'mine':'them')+(m.pending?' pending':'')+'" data-mid="'+m.id+'"><span class="tx">'+esc(m.body)+'</span><time>'+(m.pending?'Sending…':clock(d))+'</time></div>';
+    const cls='ch-m '+(m.mine?'mine':'them')+(m.pending?' pending':'')+(m.failed?' failed':'')+(m.deleted?' gone':'');
+    if(m.deleted)return h+'<div class="'+cls+'" data-mid="'+m.id+'"><span class="tx"><i class="fa-solid fa-ban"></i> This message was unsent</span><time>'+clock(d)+'</time></div>';
+    const img=m.photo||m.local;
+    const foot=m.failed?'<button type="button" class="ch-retry" data-retry="'+m.id+'">Not sent · tap to retry</button>':
+      clock(d)+(m.edited?' · edited':'')+(m.mine?' '+tickHTML(m):'');
+    h+='<div class="'+cls+'" data-mid="'+m.id+'">'+(m.reply?replyHTML(m.reply):'')+(img?'<img class="ch-img" alt="Photo" src="'+esc(img)+'">':'')+(m.body?'<span class="tx">'+esc(m.body)+'</span>':'')+'<time>'+foot+'</time></div>';
     return h;
   }
+  const sigOf=()=>CH?JSON.stringify([CH.msgs.map(m=>[m.id,m.body,m.deleted,m.edited,m.pending,m.failed]),CH.peer,CH.canWrite]):'';
   function chRender(stick){
     const old=chScroll.scrollHeight-chScroll.scrollTop,st=chScroll.scrollTop;
     chBody.innerHTML=(CH.more?'<button type="button" class="ch-more" data-act="older">Load earlier messages</button>':'')+
-      (CH.msgs.length?CH.msgs.map((m,i)=>msgHTML(m,CH.msgs[i-1])).join(''):'<div class="ch-empty">Say hello 👋</div>');
+      (CH.msgs.length?CH.msgs.map((m,i)=>msgHTML(m,CH.msgs[i-1])).join(''):'<div class="ch-empty">Say hello 👋</div>')+
+      (CH.peer&&CH.peer.typing?'<div class="ch-m them typing" aria-label="typing"><i></i><i></i><i></i></div>':'');
     if(stick==='bottom')chScroll.scrollTop=chScroll.scrollHeight;
     else if(stick==='keep')chScroll.scrollTop=chScroll.scrollHeight-old;
     else chScroll.scrollTop=st;
+    CHSIG=sigOf();chHead();
+  }
+  function seenTxt(iso){
+    const s=(Date.now()-new Date(iso).getTime())/1000;
+    if(s<100)return 'Active now';
+    if(s<3600)return 'Last seen '+Math.round(s/60)+' min ago';
+    if(s<86400)return 'Last seen '+Math.round(s/3600)+' h ago';
+    return 'Last seen '+new Date(iso).toLocaleDateString(undefined,{day:'numeric',month:'short'});
+  }
+  function chHead(){
+    if(!CH)return;const p=CH.peer||{};
+    $('#chSub').textContent=p.typing?'typing…':p.seen?seenTxt(p.seen):CH.other.role+(CH.other.verified?' · Verified':'');
+    $('#chSub').classList.toggle('live',!!p.typing||(p.seen&&Date.now()-new Date(p.seen).getTime()<100000));
+    $('#chNote').hidden=CH.canWrite;$('#chBar').hidden=!CH.canWrite;
+    if(!CH.canWrite)$('#chNote').innerHTML=CH.iBlocked?'You blocked '+esc(CH.other.name)+'. <button type="button" data-unblock="1">Unblock</button>':"You can't send messages to this person.";
+  }
+  function chPaintReq(){
+    const b=$('#chReq');
+    if(!CH||!CH.request){b.hidden=true;return}
+    b.hidden=false;b.innerHTML='<span><b>'+esc(CH.other.name)+'</b> is not linked with you. Reply or accept to move this chat to your inbox.</span><button type="button" data-rq="accept">Accept</button><button type="button" data-rq="block" class="danger">Block</button>';
   }
   function chInputFit(){chInput.style.height='auto';chInput.style.height=Math.min(chInput.scrollHeight,120)+'px';$('#chSend').disabled=!chInput.value.trim()}
+  // "Replying to ..." / "Editing message" strip above the box
+  function setCtx(kind,m){
+    if(!CH)return;CH.reply=null;CH.edit=null;
+    const b=$('#chCtx');
+    if(kind==='reply'){CH.reply={id:m.id,body:m.body||'',photo:!!m.photo,mine:m.mine}}
+    else if(kind==='edit'){CH.edit=m;chInput.value=m.body;chInputFit()}
+    if(!kind){b.hidden=true;b.innerHTML='';return}
+    b.hidden=false;
+    b.innerHTML='<i class="fa-solid '+(kind==='edit'?'fa-pen':'fa-reply')+'"></i><span><b>'+(kind==='edit'?'Editing message':'Replying to '+(m.mine?'yourself':esc(CH.other.name.split(' ')[0])))+'</b><small>'+esc(m.body||'Photo')+'</small></span><button type="button" data-ctx="x" aria-label="Cancel"><i class="fa-solid fa-xmark"></i></button>';
+    chInput.focus();
+  }
+  $('#chCtx').addEventListener('click',e=>{if(e.target.closest('[data-ctx=x]')){if(CH&&CH.edit){chInput.value='';chInputFit()}setCtx(null)}});
+  // product chats: the seller gets a "Mark as sold" strip
+  function chSoldBar(){
+    const b=$('#chSold');b.hidden=true;b.innerHTML='';
+    if(!CH)return;
+    const t=[...CH.msgs].reverse().find(m=>m.topic&&m.topic.kind==='product');if(!t)return;
+    const cv=CH;
+    rpc('get_product',{p_product:t.topic.id}).then(p=>{
+      if(CH!==cv||!p||!p.mine)return;
+      cv.prod=p;
+      b.hidden=false;b.innerHTML='<span><i class="fa-solid fa-bag-shopping"></i><b>'+esc(p.title)+'</b><small>'+(p.status==='sold'?'Sold':'Available')+'</small></span><button type="button" data-sold="1">'+(p.status==='sold'?'Mark as available':'Mark as sold')+'</button>';
+    }).catch(()=>{});
+  }
+  $('#chSold').addEventListener('click',e=>{
+    if(!e.target.closest('[data-sold]')||!CH||!CH.prod)return;
+    const p=CH.prod,cv=CH,sold=p.status!=='sold';
+    rpc('set_product_sold',{p_product:p.id,p_sold:sold}).then(r=>{setProduct(r);if(CH===cv)chSoldBar();showToast(sold?'Marked as sold ✅':'Back on sale 🛍️')}).catch(()=>fail('Could not change that'));
+  });
   function openChat(id,noPush){
     if(CH&&CH.conv===id&&isChatOpen())return Promise.resolve();
     return rpc('get_messages',{p_conv:id,p_limit:30}).then(r=>{
       if(!r){showToast('That chat is not available');ovMissing();return}
-      CH={conv:id,other:r.other,msgs:r.messages,more:r.more,canWrite:r.canWrite};
+      CH={conv:id,other:r.other,msgs:r.messages,more:r.more,canWrite:r.canWrite,iBlocked:r.iBlocked,request:r.request,prefs:r.prefs,peer:r.peer,reply:null,edit:null,prod:null};
       HANDLES[r.other.id]=r.other.handle;PNAME[r.other.id]=r.other.name;
-      $('#chAv').src=FACE(r.other.avatar);$('#chName').textContent=r.other.name;$('#chSub').textContent=r.other.role+(r.other.verified?' · Verified':'');
-      $('#chNote').hidden=r.canWrite;$('#chBar').hidden=!r.canWrite;
-      chInput.value='';chInputFit();chRender('bottom');
+      $('#chAv').src=FACE(r.other.avatar);$('#chName').textContent=r.other.name;
+      chInput.value='';chInputFit();setCtx(null);chPaintReq();chRender('bottom');chSoldBar();
       raiseOv(chatView);chatView.classList.add('open');chatView.setAttribute('aria-hidden','false');
       setTimeout(()=>{if(CH&&CH.conv===id)chScroll.scrollTop=chScroll.scrollHeight},80);
       paintMsgBadge(r.unread);
       const it=MS.items.find(x=>x.id===id);if(it&&it.unread){it.unread=false;paintMsList()}
       if(!noPush)ovPush('/messages/'+id);
+      pollLoop();
       if(isWide()&&r.canWrite)setTimeout(()=>chInput.focus(),120);
     }).catch(()=>{fail('Could not open that chat');ovMissing()});
   }
   function closeChat(){
     chatView.classList.remove('open');chatView.setAttribute('aria-hidden','true');
+    closeBSheet(qrSheet);setTimeout(()=>pollLoop(),0);
     if(curPage==='messages')refreshConvs();
   }
   // start (or continue) a chat with someone and open it; `o` can carry a first message about a room or product
@@ -1719,23 +1870,90 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   $('#chBack').addEventListener('click',()=>ovBack(closeChat));
   $('#chWho').addEventListener('click',()=>{if(!CH)return;const h=CH.other.handle;ovBack(closeChat);setTimeout(()=>openProfile(h),60)});
-  chInput.addEventListener('input',chInputFit);
+  chInput.addEventListener('input',()=>{
+    chInputFit();
+    if(CH&&chInput.value&&Date.now()-lastTyping>3000){lastTyping=Date.now();rpc('set_typing',{p_conv:CH.conv}).catch(()=>{})}
+  });
   chInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&isWide()){e.preventDefault();if(chInput.value.trim())$('#chBar').requestSubmit()}});
   $('#chBar').addEventListener('submit',e=>{e.preventDefault();sendChat()});
-  function sendChat(){
-    const body=chInput.value.trim();if(!body||!CH)return;
-    const cv=CH,tmp={id:'t'+(++chTmp),mine:true,body,at:new Date().toISOString(),pending:true};
-    cv.msgs.push(tmp);chInput.value='';chInputFit();chRender('bottom');
-    rpc('send_message',{p_conv:cv.conv,p_body:body}).then(m=>{
+
+  // ---- sending (with a pending clock, then ticks; a failed one can be tapped to try again) ----
+  function sendMsg(cv,tmp){
+    return (async()=>{
+      if(tmp.blob&&!tmp.remote){tmp.remote=await uploadPostImage(tmp.blob,tmp.ext);trashAdd([tmp.remote],600000)}
+      return rpc('send_message',{p_conv:cv.conv,p_body:tmp.body||'',p_reply:tmp.replyId||null,p_photo:tmp.remote||null,p_kind:null,p_topic:null});
+    })().then(m=>{
+      if(tmp.remote)trashDrop([tmp.remote]);
+      if(tmp.local)try{URL.revokeObjectURL(tmp.local)}catch(e){}
       const i=cv.msgs.findIndex(x=>x.id===tmp.id);
       if(cv.msgs.some(x=>x.id===m.id)){if(i>-1)cv.msgs.splice(i,1)}else if(i>-1)cv.msgs[i]=m;
       if(CH===cv)chRender('bottom');
       if(curPage==='messages')refreshConvs();
     }).catch(e=>{
-      const i=cv.msgs.findIndex(x=>x.id===tmp.id);if(i>-1)cv.msgs.splice(i,1);
-      if(CH===cv){chRender();chInput.value=body;chInputFit()}
+      tmp.pending=false;tmp.failed=true;if(CH===cv)chRender();
       fail(epErr(e));
     });
+  }
+  function sendChat(){
+    const body=chInput.value.trim();if(!body||!CH)return;
+    const cv=CH;
+    if(cv.edit){
+      const m=cv.edit;
+      rpc('edit_message',{p_msg:m.id,p_body:body}).then(r=>{
+        const i=cv.msgs.findIndex(x=>x.id===m.id);if(i>-1)cv.msgs[i]=r;
+        if(CH===cv)chRender();if(curPage==='messages')refreshConvs();
+      }).catch(e=>fail(epErr(e)));
+      chInput.value='';chInputFit();setCtx(null);return;
+    }
+    const tmp={id:'t'+(++chTmp),mine:true,body,at:new Date().toISOString(),pending:true,replyId:cv.reply?cv.reply.id:null,reply:cv.reply};
+    cv.msgs.push(tmp);chInput.value='';chInputFit();setCtx(null);chRender('bottom');
+    sendMsg(cv,tmp);
+  }
+  $('#chAttach').addEventListener('click',()=>{if(CH)$('#chFile').click()});
+  $('#chFile').addEventListener('change',async e=>{
+    const f=e.target.files&&e.target.files[0];e.target.value='';
+    if(!f||!CH)return;
+    const cv=CH;let r;
+    try{r=await compressImage(f)}catch(err){fail('That photo could not be used');return}
+    const body=chInput.value.trim();
+    const tmp={id:'t'+(++chTmp),mine:true,body,at:new Date().toISOString(),pending:true,blob:r.blob,ext:r.ext,local:URL.createObjectURL(r.blob),replyId:cv.reply?cv.reply.id:null,reply:cv.reply};
+    cv.msgs.push(tmp);chInput.value='';chInputFit();setCtx(null);chRender('bottom');
+    sendMsg(cv,tmp);
+  });
+  $('#chQr').addEventListener('click',()=>{if(CH)openQr(t=>{chInput.value=(chInput.value?chInput.value+' ':'')+t;chInputFit();chInput.focus()})});
+
+  // ---- what you can do with one message ----
+  function msgMenu(m,el){
+    const it=[],name=CH.other.name.split(' ')[0];
+    if(m.deleted){
+      it.push({icon:'fa-trash-can',t:'Delete for me',fn:()=>hideMsg(m)});
+      return openMenu(el,'',it);
+    }
+    it.push({icon:'fa-reply',t:'Reply',fn:()=>setCtx('reply',m)});
+    if(m.body)it.push({icon:'fa-copy',t:'Copy',fn:()=>copyText(m.body,'Message copied')});
+    if(m.photo)it.push({icon:'fa-image',t:'Open photo',fn:()=>window.open(m.photo,'_blank','noopener')});
+    if(m.mine&&m.body&&Date.now()-new Date(m.at).getTime()<15*60e3)it.push({icon:'fa-pen',t:'Edit',s:'Up to 15 minutes after sending',fn:()=>setCtx('edit',m)});
+    it.push({icon:'fa-trash-can',t:'Delete for me',s:name+' still sees it',fn:()=>hideMsg(m)});
+    if(m.mine)it.push({icon:'fa-rotate-left',t:'Unsend',s:'Removes it for both of you',danger:true,fn:()=>unsendMsg(m)});
+    else it.push({icon:'fa-flag',t:'Report message',danger:true,fn:()=>openReport('message',m.id,el,()=>msgMenu(m,el))});
+    openMenu(el,'',it);
+  }
+  function hideMsg(m){
+    const cv=CH;
+    rpc('hide_message',{p_msg:m.id}).then(()=>{cv.msgs=cv.msgs.filter(x=>x.id!==m.id);if(CH===cv)chRender();if(curPage==='messages')refreshConvs()}).catch(()=>fail('Could not delete that'));
+  }
+  async function unsendMsg(m){
+    const ok=await confirmBox({title:'Unsend this message?',text:'It is removed for both of you. '+CH.other.name.split(' ')[0]+' will see "This message was unsent".',ok:'Unsend'});
+    if(!ok||!CH)return;
+    const cv=CH;
+    try{
+      const r=await rpc('unsend_message',{p_msg:m.id});
+      const i=cv.msgs.findIndex(x=>x.id===m.id);if(i>-1)cv.msgs[i]=Object.assign({},cv.msgs[i],{deleted:true,body:'',photo:null,topic:null,reply:null});
+      if(CH===cv)chRender();
+      if(r&&r.photo)purgePhotos([r.photo]).catch(()=>{});
+      if(curPage==='messages')refreshConvs();
+      showToast('Message unsent');
+    }catch(e){fail('Could not unsend that')}
   }
   chBody.addEventListener('click',e=>{
     const t=e.target.closest('[data-tk]');
@@ -1744,28 +1962,130 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       const first=CH.msgs.find(m=>typeof m.id==='number');if(!first)return;
       const cv=CH;
       rpc('get_messages',{p_conv:cv.conv,p_limit:30,p_before:first.id}).then(r=>{if(CH!==cv)return;cv.msgs=r.messages.concat(cv.msgs);cv.more=r.more;chRender('keep')}).catch(()=>fail('Could not load more'));
+      return;
     }
+    const rt=e.target.closest('[data-retry]');
+    if(rt&&CH){const tmp=CH.msgs.find(x=>x.id===rt.dataset.retry);if(tmp){tmp.failed=false;tmp.pending=true;chRender();sendMsg(CH,tmp)}return}
+    const q=e.target.closest('.ch-q');
+    if(q){const el=chBody.querySelector('[data-mid="'+q.dataset.qid+'"]');if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1200)}else showToast('Scroll up to load that message');return}
+    const b=e.target.closest('.ch-m');
+    if(b&&!b.classList.contains('typing')&&CH){const m=CH.msgs.find(x=>String(x.id)===b.dataset.mid);if(m&&typeof m.id==='number')msgMenu(m,b)}
   });
 
-  // ---- new messages ----
+  // ---- the ⋯ of a chat ----
+  async function blockUser(on){
+    if(!CH)return;
+    if(on){
+      const ok=await confirmBox({title:'Block '+CH.other.name+'?',text:'You will not be able to message each other. You can unblock them any time in Settings.',ok:'Block'});
+      if(!ok)return;
+    }
+    const cv=CH;
+    rpc('block_user',{p_user:cv.other.id,p_on:on}).then(()=>{
+      cv.iBlocked=on;
+      return rpc('poll_messages',{p_after:9e15,p_conv:cv.conv}).then(r=>{if(r.peer)cv.canWrite=r.peer.canWrite;else cv.canWrite=!on}).catch(()=>{cv.canWrite=!on});
+    }).then(()=>{if(CH===cv){chRender();chPaintReq()}showToast(on?'Blocked 🚫':'Unblocked');refreshConvs()}).catch(()=>fail('Could not do that'));
+  }
+  function chatMenu(anchor){
+    if(!CH)return;const p=CH.prefs,o=CH.other,id=CH.conv,it=[];
+    it.push({icon:'fa-user',t:'View profile',fn:()=>{const h=o.handle;ovBack(closeChat);setTimeout(()=>openProfile(h),60)}});
+    if(CH.request)it.push({icon:'fa-user-check',t:'Accept request',fn:()=>convPref(id,'accepted',true,'Request accepted ✅')});
+    it.push({icon:'fa-thumbtack',t:p.pinned?'Unpin':'Pin to top',fn:()=>convPref(id,'pinned',!p.pinned,p.pinned?'Unpinned':'Pinned 📌')});
+    it.push({icon:p.muted?'fa-bell':'fa-bell-slash',t:p.muted?'Unmute':'Mute',fn:()=>convPref(id,'muted',!p.muted,p.muted?'Unmuted 🔔':'Muted')});
+    it.push({icon:p.archived?'fa-box-open':'fa-box-archive',t:p.archived?'Unarchive':'Archive',fn:()=>convPref(id,'archived',!p.archived,p.archived?'Moved back to your chats':'Archived 📦')});
+    it.push({icon:'fa-bolt',t:'Quick replies',fn:()=>$('#chQr').click()});
+    it.push({icon:'fa-trash',t:'Delete chat',s:'Only from your side',danger:true,fn:()=>deleteChat(id,o.name)});
+    it.push({icon:CH.iBlocked?'fa-user-check':'fa-ban',t:CH.iBlocked?'Unblock':'Block',danger:!CH.iBlocked,fn:()=>blockUser(!CH.iBlocked)});
+    it.push({icon:'fa-flag',t:'Report '+o.name.split(' ')[0],danger:true,fn:()=>openReport('profile',o.id,anchor,()=>chatMenu(anchor))});
+    openMenu(anchor,'',it);
+  }
+  $('#chMore').addEventListener('click',e=>chatMenu(e.currentTarget));
+  $('#chNote').addEventListener('click',e=>{if(e.target.closest('[data-unblock]'))blockUser(false)});
+  $('#chReq').addEventListener('click',e=>{
+    const b=e.target.closest('[data-rq]');if(!b||!CH)return;
+    if(b.dataset.rq==='accept')convPref(CH.conv,'accepted',true,'Request accepted ✅');else blockUser(true);
+  });
+
+  // ---- quick replies (saved answers for landlords and sellers) ----
+  const QR_K='ghetto.qr.'+ME.id;
+  const QR_DEF=['Hi! Yes, it is still available.','Where would you like to meet?','Can I send you more photos?','What time works for you?','Sorry, it is no longer available.'];
+  const qrGet=()=>{try{const a=JSON.parse(localStorage.getItem(QR_K)||'null');return Array.isArray(a)?a:QR_DEF.slice()}catch(e){return QR_DEF.slice()}};
+  const qrSave=a=>{try{localStorage.setItem(QR_K,JSON.stringify(a))}catch(e){}};
+  let qrPick=null;
+  function qrPaint(){
+    const a=qrGet();
+    $('#qrList').innerHTML=a.length?a.map((t,i)=>'<div class="qr-row"><button type="button" class="qr-t" data-qp="'+i+'">'+esc(t)+'</button><button type="button" class="qr-x" data-qx="'+i+'" aria-label="Remove"><i class="fa-solid fa-xmark"></i></button></div>').join(''):'<div class="qr-none">No quick replies yet. Add one below.</div>';
+  }
+  function openQr(pick){qrPick=pick||null;$('#qrNew').value='';qrPaint();openBSheet(qrSheet)}
+  $('#qrList').addEventListener('click',e=>{
+    const a=qrGet(),x=e.target.closest('[data-qx]'),p=e.target.closest('[data-qp]');
+    if(x){a.splice(+x.dataset.qx,1);qrSave(a);qrPaint();return}
+    if(p){const t=a[+p.dataset.qp];if(qrPick&&t){closeBSheet(qrSheet);qrPick(t)}}
+  });
+  const qrAdd=()=>{const i=$('#qrNew'),t=i.value.trim();if(!t)return;const a=qrGet();if(a.length>=12){fail('You can keep up to 12');return}a.push(t);qrSave(a);i.value='';qrPaint()};
+  $('#qrAdd').addEventListener('click',qrAdd);
+  $('#qrNew').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();qrAdd()}});
+
+  // ---- send a room or product into a chat ----
+  function openShare(kind,id,title){
+    $('#shSub').textContent=title;$('#shList').innerHTML='<div class="qr-none">Loading…</div>';openBSheet(shSheet);
+    rpc('get_conversations',{p_limit:30,p_filter:'all'}).then(r=>{
+      const l=r.items;
+      $('#shList').innerHTML=l.length?l.map(c=>'<button type="button" class="sh-row" data-sc="'+c.id+'"><span class="avatar"><img src="'+FACE(c.other.avatar)+'" alt="" onerror="this.remove()"></span><b>'+esc(c.other.name)+'</b><i class="fa-solid fa-paper-plane"></i></button>').join(''):'<div class="qr-none">No chats yet. Message someone first.</div>';
+      $('#shList').onclick=e=>{
+        const b=e.target.closest('[data-sc]');if(!b)return;
+        const c=l.find(x=>x.id===b.dataset.sc);b.disabled=true;
+        rpc('send_message',{p_conv:c.id,p_body:'Check this out 👀',p_reply:null,p_photo:null,p_kind:kind,p_topic:id})
+          .then(()=>{closeBSheet(shSheet);showToast('Sent to '+c.other.name+' 💬')}).catch(err=>{b.disabled=false;fail(epErr(err))});
+      };
+    }).catch(()=>{$('#shList').innerHTML='<div class="qr-none">Could not load your chats.</div>'});
+  }
+
+  // ---- blocked people ----
+  function openBlocked(){
+    $('#blList').innerHTML='<div class="qr-none">Loading…</div>';openBSheet(blSheet);
+    rpc('get_blocked').then(l=>{
+      $('#blList').innerHTML=l.length?l.map(p=>'<div class="sh-row" data-bp="'+p.id+'"><span class="avatar"><img src="'+FACE(p.avatar)+'" alt="" onerror="this.remove()"></span><b>'+esc(p.name)+'</b><button type="button" class="bl-un" data-unb="'+p.id+'">Unblock</button></div>').join(''):'<div class="qr-none">You have not blocked anyone.</div>';
+    }).catch(()=>{$('#blList').innerHTML='<div class="qr-none">Could not load that.</div>'});
+  }
+  $('#blList').addEventListener('click',e=>{
+    const b=e.target.closest('[data-unb]');if(!b)return;b.disabled=true;
+    rpc('block_user',{p_user:b.dataset.unb,p_on:false}).then(()=>{
+      const r=b.closest('[data-bp]');if(r)r.remove();
+      if(!$('#blList [data-bp]'))$('#blList').innerHTML='<div class="qr-none">You have not blocked anyone.</div>';
+      showToast('Unblocked');
+    }).catch(()=>{b.disabled=false;fail('Could not do that')});
+  });
+
+  // ---- news from the server ----
   function pollMsgs(){
-    return rpc('poll_messages',{p_after:MMAX==null?9e15:MMAX}).then(r=>{
+    const cv=CH&&isChatOpen()?CH:null;
+    return rpc('poll_messages',{p_after:MMAX==null?9e15:MMAX,p_conv:cv?cv.conv:null}).then(r=>{
       if(MMAX==null){MMAX=r.maxId;paintMsgBadge(r.unread);return}
       if(r.maxId>MMAX)MMAX=r.maxId;
-      let fresh=0,live=false;
+      let fresh=0,live=false,incoming=false;
       const near=chScroll.scrollHeight-chScroll.scrollTop-chScroll.clientHeight<140;
       r.items.forEach(m=>{
-        if(CH&&isChatOpen()&&m.conv===CH.conv){if(!CH.msgs.some(x=>x.id===m.id)){CH.msgs.push(m);live=true}}
-        else if(!m.mine)fresh++;
+        if(cv&&CH===cv&&m.conv===cv.conv){if(!cv.msgs.some(x=>x.id===m.id)){cv.msgs.push(m);live=true;if(!m.mine)incoming=true}}
+        else if(!m.mine){const c=MS.items.find(x=>x.id===m.conv);if(!(c&&c.muted))fresh++}
       });
-      if(live){chRender(near?'bottom':undefined);rpc('mark_conversation_read',{p_conv:CH.conv}).then(paintMsgBadge).catch(()=>{})}
-      else paintMsgBadge(r.unread);
-      if(fresh)showToast('💬 New message');
+      if(cv&&CH===cv){
+        if(r.peer){cv.peer=r.peer;cv.canWrite=r.peer.canWrite}
+        (r.recent||[]).forEach(rm=>{const i=cv.msgs.findIndex(x=>x.id===rm.id);if(i>-1){const o=cv.msgs[i];if(o.deleted!==rm.deleted||o.edited!==rm.edited||o.body!==rm.body)cv.msgs[i]=rm}});
+        if(sigOf()!==CHSIG)chRender(live&&near?'bottom':undefined);
+        if(incoming){blip();rpc('mark_conversation_read',{p_conv:cv.conv}).then(paintMsgBadge).catch(()=>{})}
+        else paintMsgBadge(r.unread);
+      }else paintMsgBadge(r.unread);
+      if(fresh){showToast('💬 New message');blip()}
       if(r.items.length&&curPage==='messages')refreshConvs();
     }).catch(()=>{});
   }
-  setInterval(()=>{mTick++;if(document.hidden)return;if(isChatOpen()||curPage==='messages'||mTick%4===0)pollMsgs()},5000);
-  pollMsgs();
+  const pollDelay=()=>isChatOpen()?2000:curPage==='messages'?5000:20000;
+  let pollT=null;
+  function pollLoop(){clearTimeout(pollT);pollT=setTimeout(()=>{(document.hidden?Promise.resolve():pollMsgs()).finally(pollLoop)},pollDelay())}
+  // ask again right now and restart the wait (used when the chat or the chat list opens, so it never waits out a slow 20 s turn)
+  function pollNow(){clearTimeout(pollT);pollMsgs().finally(pollLoop)}
+  pollNow();
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollMsgs()});
 
   // ---- new post: see CREATE A POST below ----
   function postHTML(p){
@@ -2940,6 +3260,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     if(own)it.push({icon:'fa-pen',t:'Edit room',s:'Price, details, photos',fn:()=>openEditRoom(r)});
     it.push({icon:'fa-link',t:'Copy link',fn:()=>copyText(roomLink(r.id),'Room link copied 🔗')});
     if(canShare)it.push({icon:'fa-share-nodes',t:'Share…',fn:()=>shareLink(roomLink(r.id),r.title)});
+    it.push({icon:'fa-paper-plane',t:'Send in a chat',fn:()=>openShare('room',r.id,r.title)});
     if(own)it.push({icon:'fa-trash',t:'Delete room',s:'Also deletes its photos',danger:true,fn:()=>deleteRoom(r)});
     else it.push({icon:'fa-flag',t:'Report this listing',danger:true,fn:()=>openReport('room',r.id,anchor,()=>openRoomMenu(anchor))});
     openMenu(anchor,'',it);
@@ -2992,6 +3313,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const WHO=[['everyone','Everyone'],['links','My links'],['nobody','No one']];
   const swRow=(k,icon,tone,t,d)=>'<div class="st-row tap" data-sw="'+k+'" role="switch" tabindex="0" aria-checked="'+!!SET[k]+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span><span class="st-sw'+(SET[k]?' on':'')+'"></span></div>';
   const linkRow=(act,icon,tone,t,d,val,cls)=>'<button type="button" class="st-row'+(cls?' '+cls:'')+'" data-st="'+act+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b>'+(d?'<small>'+d+'</small>':'')+'</span>'+(val?'<span class="st-val">'+esc(val)+'</span>':'')+'<i class="fa-solid fa-chevron-right st-chev"></i></button>';
+  const msSw=(k,icon,tone,t,d)=>'<div class="st-row tap" data-msw="'+k+'" role="switch" tabindex="0" aria-checked="'+!!MSET[k]+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span><span class="st-sw'+(MSET[k]?' on':'')+'"></span></div>';
   const segRow=(k,icon,tone,t,d,opts)=>'<div class="st-row st-seg-row"><div class="st-head"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span></div><div class="st-seg" data-seg="'+k+'">'+opts.map(o=>'<button type="button" data-val="'+o[0]+'" class="'+(SET[k]===o[0]?'on':'')+'">'+o[1]+'</button>').join('')+'</div></div>';
 
   // the settings are split into categories. On a phone they are one page; on a desktop the page lists the
@@ -2999,6 +3321,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const CATS=[
     ['account','fa-user','y','Account','Profile, email and password'],
     ['privacy','fa-lock','b','Privacy','Private account, activity and messages'],
+    ['messages','fa-comment-dots','y','Messages','Read receipts, last seen, sounds, blocked people'],
     ['notifications','fa-bell','r','Notifications','Likes, comments, links and rooms'],
     ['language','fa-globe','g','Language','Choose the app language'],
     ['help','fa-circle-question','b','Help and about','Support, safety and terms'],
@@ -3015,6 +3338,12 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
         swRow('privateAccount','fa-lock','b','Private account','Only people linked with you can see your posts')+
         swRow('showActivity','fa-circle','g','Activity status','Let people see when you are active')+
         segRow('whoCanMessage','fa-comment-dots','y','Who can message you','Choose who may start a chat with you',WHO);
+    if(k==='messages')return ''+
+        msSw('read_receipts','fa-check-double','b','Read receipts','Show blue ticks. If off, you will not see them from others either')+
+        msSw('show_last_active','fa-clock','g','Last active','Show when you were last online. If off, you will not see it from others either')+
+        msSw('sounds','fa-volume-high','y','Message sounds','A short sound when a message arrives')+
+        linkRow('blocked','fa-user-slash','r','Blocked people','People who cannot message you')+
+        linkRow('qr','fa-bolt','y','Quick replies','Saved answers for landlords and sellers');
     if(k==='notifications')return ''+
         swRow('notifyLikes','fa-heart','r','Likes','When someone likes your post')+
         swRow('notifyComments','fa-comment','b','Comments and mentions','Replies, comments and @mentions')+
@@ -3032,7 +3361,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
         linkRow('logout','fa-right-from-bracket','r','Log out','Signed in as '+esc(s.email||'@'+s.handle))+
         linkRow('delete','fa-trash','r','Delete account','Remove your profile and everything you posted','','danger');
   }
-  const stTitle=k=>({account:'Your account',privacy:'Privacy',notifications:'Notifications',language:'Language',help:'Help and about',login:'Login'}[k]);
+  const stTitle=k=>({account:'Your account',privacy:'Privacy',messages:'Messages',notifications:'Notifications',language:'Language',help:'Help and about',login:'Login'}[k]);
   function renderSettings(){
     const rs=$('#rSettings');
     if(!SET){stBody.innerHTML='<div class="d-empty">Loading settings…</div>';if(rs)rs.innerHTML='';return}
@@ -3072,6 +3401,13 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function stClick(e){
     const cat=e.target.closest('[data-cat]');
     if(cat){stCat=cat.dataset.cat;renderSettings();return}
+    const ms=e.target.closest('[data-msw]');
+    if(ms){
+      const k=ms.dataset.msw,on=!MSET[k],old=MSET[k];MSET[k]=on;
+      const t=$('.st-sw',ms);t.classList.toggle('on',on);ms.setAttribute('aria-checked',String(on));
+      rpc('update_message_setting',{p_key:k,p_value:on}).then(()=>showToast('Saved ✅')).catch(()=>{MSET[k]=old;renderSettings();fail('Could not save that setting')});
+      return;
+    }
     const sw=e.target.closest('[data-sw]');
     if(sw){
       const k=sw.dataset.sw,on=!SET[k];
@@ -3094,6 +3430,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(act==='profile')openProfile(ME.handle);
     else if(act==='edit'){pendingEdit=true;openProfile(ME.handle)}
     else if(act==='password')openPassword();
+    else if(act==='blocked')openBlocked();
+    else if(act==='qr')openQr(null);
     else if(act==='logout')openLogout();
     else if(act==='delete')openDelete();
     else if(act==='help')showToast('Help centre is coming soon 🙋');
@@ -3103,7 +3441,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
   stBody.addEventListener('click',stClick);
   $('#rSettings').addEventListener('click',stClick);
-  const stKey=e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sw],.st-who')){e.preventDefault();e.target.click()}};
+  const stKey=e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sw],[data-msw],.st-who')){e.preventDefault();e.target.click()}};
   stBody.addEventListener('keydown',stKey);$('#rSettings').addEventListener('keydown',stKey);
   if(wideMQ&&wideMQ.addEventListener)wideMQ.addEventListener('change',()=>{if(curPage==='settings')renderSettings();updateRail();renderRailProfile()});
 
