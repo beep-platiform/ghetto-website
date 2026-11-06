@@ -27,6 +27,9 @@ export default function RightRail() {
         <section className="r-card r-tip"><h3><i className="fa-solid fa-shield-halved"></i>Stay safe</h3><p>Always visit a room and meet the landlord before you pay. Ghetto never asks you for money in chat.</p></section>
       </div>
       <div className="r-room" id="rRoom"></div>
+      <div className="r-chat" id="rChat">
+        <div className="r-chat-empty" id="rChatEmpty"><div className="s-emoji">💬</div><b>Your messages</b><p>Pick a chat on the left to read it here.</p></div>
+      </div>
     </aside>
   );
 }

@@ -1537,3 +1537,34 @@ textarea.cr-in{resize:vertical;min-height:120px;line-height:1.5}
 .sh-row b{flex:1;font-size:14.5px}
 .sh-row>i{color:var(--muted)}
 .bl-un{height:34px;padding:0 14px;border-radius:17px;background:#eef1f6;font-weight:800;font-size:13px}
+
+/* ===== desktop messages: list in the middle, chat in the right column ===== */
+.r-chat{display:none}
+@media (min-width:1100px){
+  .rail.messages-mode{flex-basis:560px;padding:0;overflow:hidden;border-left:1px solid var(--line)}
+  .rail.messages-mode>.r-search,.rail.messages-mode>.r-card,.rail.messages-mode>.r-foot{display:none}
+  .rail.messages-mode .r-chat{display:block;height:100%;position:relative}
+  .r-chat-empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;color:var(--muted);padding:30px}
+  .r-chat-empty b{color:var(--ink);font-size:18px}
+  .r-chat-empty .s-emoji{font-size:44px}
+  .rail.chat-open .r-chat-empty{display:none}
+  .r-chat #chatView{position:absolute;inset:0;z-index:auto!important;transform:none;transition:none;visibility:hidden;display:none}
+  .r-chat #chatView.open{display:flex;visibility:visible}
+  .r-chat #chBack{display:none}
+  .ms-row.active{background:#fff6dc}
+  .app[data-page="messages"] .ms-top{display:none}
+}
+
+/* ===== settings: look, text size, calmer motion, info sheets ===== */
+html[data-rm="1"] *,html[data-rm="1"] *::before,html[data-rm="1"] *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+html[data-ts="small"] .shell{zoom:.92}
+html[data-ts="large"] .shell{zoom:1.1}
+html[data-theme="dark"]{background:#0b0f17;color-scheme:dark;filter:invert(.93) hue-rotate(180deg)}
+html[data-theme="dark"] img:not(.keep-light),html[data-theme="dark"] video,html[data-theme="dark"] .avatar,html[data-theme="dark"] .s-create,html[data-theme="dark"] .fab{filter:invert(1) hue-rotate(180deg)}
+.st-times{display:flex;align-items:center;gap:10px;padding:10px 16px}
+.st-time{height:40px;border-radius:12px;border:1.5px solid var(--line);padding:0 10px;font:inherit;font-weight:700;background:#fff;color:var(--ink)}
+.fb-kinds{margin:6px 0 10px}
+.inf-q{background:#f4f6fa;border-radius:14px;padding:12px 14px;margin:8px 0}
+.inf-q summary{font-weight:800;font-size:14.5px;cursor:pointer}
+.inf-q p{margin-top:8px;font-size:14px;line-height:1.55;color:#44546f}
+#infoSheet,#fbSheet{z-index:130}

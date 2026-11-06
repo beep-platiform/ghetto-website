@@ -41,4 +41,6 @@ export type Settings = {
   privateAccount: boolean; showActivity: boolean; whoCanMessage: 'everyone' | 'links' | 'nobody';
   notifyLikes: boolean; notifyComments: boolean; notifyLinks: boolean; notifyRooms: boolean; notifyPrices: boolean; notifyEmail: boolean;
   language: 'en' | 'rw' | 'fr';
+  theme: 'light' | 'dark' | 'system'; textSize: 'small' | 'normal' | 'large'; reduceMotion: boolean; dataSaver: boolean;
+  notifyMessages: boolean; quietEnabled: boolean; quietFrom: string; quietTo: string;
 };

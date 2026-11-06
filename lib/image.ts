@@ -37,7 +37,12 @@ async function decode(file: File): Promise<{ src: CanvasImageSource; w: number; 
   }
 }
 
+/** Data saver: smaller photos (about 70 KB) for people on slow or expensive data. */
+let saver = false;
+export const setDataSaver = (v: boolean) => { saver = !!v; };
+
 export async function compressImage(file: File): Promise<Packed> {
+  const maxSide = saver ? 960 : MAX_SIDE, target = saver ? 70 * 1024 : TARGET;
   if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name)) throw new Error('That file is not a photo');
   let img;
   try { img = await decode(file); } catch { throw new Error('This photo type is not supported. Try a JPG or PNG'); }
@@ -49,7 +54,7 @@ export async function compressImage(file: File): Promise<Packed> {
     // WebP is ~30% smaller than JPEG at the same look. Safari older than 14 cannot encode it: use JPEG there.
     const webp = canvas.toDataURL('image/webp').indexOf('data:image/webp') === 0;
     const type = webp ? 'image/webp' : 'image/jpeg';
-    let side = MAX_SIDE;
+    let side = maxSide;
     let best: Blob | null = null, bw = 0, bh = 0;
     for (;;) {
       const k = Math.min(1, side / Math.max(img.w, img.h));
@@ -60,10 +65,10 @@ export async function compressImage(file: File): Promise<Packed> {
       ctx.drawImage(img.src, 0, 0, w, h);
       let q = START_Q;
       let blob = await toBlob(canvas, type, q);
-      while (blob && blob.size > TARGET && q > MIN_Q) { q = Math.max(MIN_Q, q - 0.08); blob = await toBlob(canvas, type, q); }
+      while (blob && blob.size > target && q > MIN_Q) { q = Math.max(MIN_Q, q - 0.08); blob = await toBlob(canvas, type, q); }
       if (!blob) throw new Error('Could not shrink this photo');
       best = blob; bw = w; bh = h;
-      if (blob.size <= TARGET || side <= MIN_SIDE) break;
+      if (blob.size <= target || side <= MIN_SIDE) break;
       side = Math.max(MIN_SIDE, Math.round(side * 0.85)); // still too big: fewer pixels, then try again
     }
     if (!best || best.size > HARD_MAX) throw new Error('This photo is too detailed to shrink enough. Try another one');

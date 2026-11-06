@@ -15,10 +15,14 @@ export const viewport: Viewport = {
   interactiveWidget: 'resizes-content',
 };
 
+/** Puts the saved look (dark mode, text size, calmer motion) on the page before it paints, so there is no flash. */
+const LOOK_JS = "try{var l=JSON.parse(localStorage.getItem('ghetto.look')||'null');if(l){var d=document.documentElement;var t=l.theme==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):l.theme;d.dataset.theme=t;d.dataset.ts=l.ts||'normal';d.dataset.rm=l.rm?'1':'0'}}catch(e){}";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: LOOK_JS }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link

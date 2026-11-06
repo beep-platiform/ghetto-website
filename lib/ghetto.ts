@@ -7,7 +7,7 @@
  */
 import { RFAC, RTYPES, RTYPE, ICON, POOL } from './constants';
 import { rpc, supabase, signOut, uploadPostImage, removePostImages } from './supabase';
-import { compressImage, prettySize } from './image';
+import { compressImage, prettySize, setDataSaver } from './image';
 import { metaOf } from './format';
 
 export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
@@ -1104,6 +1104,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     rail.classList.toggle('profile-mode',wide&&!comments&&!room&&curPage==='profile');
     rail.classList.toggle('settings-mode',wide&&!comments&&!room&&curPage==='settings');
     rail.classList.toggle('create-mode',wide&&!comments&&!room&&curPage==='create');
+    rail.classList.toggle('messages-mode',wide&&!comments&&!room&&curPage==='messages');
+    try{placeChat()}catch(e){}
     placePreview();
     if(railReady&&wide&&curPage==='profile')renderRailProfile();
     const host=(wide&&curPage==='rooms')?$('#rfHost'):$('#fsBody'),fp=$('#filterPanel');
@@ -1609,6 +1611,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // That drives the ticks, "typing...", edits and unsent messages, and the red number on the message icon.
   // =====================================================================
   const MS={items:[],next:null,done:false,busy:false,started:false,seq:0,filter:'all',q:'',res:null,rseq:0,counts:{requests:0,archived:0,unread:0}};
+  let alertsOn=()=>true;
   let MMAX=null,CH=null,chTmp=0,CHSIG='',lastTyping=0,MSET={read_receipts:true,show_last_active:true,sounds:true};
   const chatView=$('#chatView'),msList=$('#msList'),msScroll=$('#msScroll'),chScroll=$('#chScroll'),chBody=$('#chBody'),chInput=$('#chInput');
   const qrSheet=$('#qrSheet'),shSheet=$('#shSheet'),blSheet=$('#blSheet');
@@ -1625,7 +1628,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   // a short "blip" for a new message (if sounds are on)
   let actx=null;
   function blip(){
-    if(!MSET.sounds)return;
+    if(!MSET.sounds||!alertsOn())return;
     try{
       actx=actx||new (window.AudioContext||window.webkitAudioContext)();
       const o=actx.createOscillator(),g=actx.createGain();o.type='sine';o.frequency.value=880;
@@ -1655,7 +1658,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   function paintMsList(){
     paintChips();
     const list=MS.res!==null?MS.res:MS.items;
-    msList.innerHTML=list.map(convHTML).join('');
+    msList.innerHTML=list.map(convHTML).join('');placeChat();
     const empty=!list.length&&(MS.res!==null||(MS.done&&!MS.busy));
     $('#msEmpty').hidden=!empty;
     if(empty){const e=EMPTY[MS.res!==null?'search':MS.filter];$('#msEmptyT').textContent=e[0];$('#msEmptyP').textContent=e[1]}
@@ -1752,6 +1755,16 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   $('#msBack').addEventListener('click',backFromMessages);
   $('#msgBtn').addEventListener('click',openMessages);
 
+  // ---- on a wide screen the chat opens in the right column; on a phone it slides over the page ----
+  function placeChat(){
+    const rc=$('#rChat'),rail=$('#rail');if(!rc)return;
+    if(!placeChat.home)placeChat.home={p:chatView.parentNode,n:chatView.nextSibling};
+    const want=(isWide()&&curPage==='messages')?rc:placeChat.home.p;
+    if(chatView.parentNode!==want){if(want===rc)rc.appendChild(chatView);else want.insertBefore(chatView,placeChat.home.n&&placeChat.home.n.parentNode===want?placeChat.home.n:null)}
+    const inRail=want===rc;
+    rail.classList.toggle('chat-open',inRail&&isChatOpen());
+    $$('.ms-row',msList).forEach(r=>r.classList.toggle('active',inRail&&isChatOpen()&&!!CH&&r.dataset.conv===CH.conv));
+  }
   // ---------- one chat ----------
   const dayLabel=d=>{const t=new Date(),y=new Date(Date.now()-864e5),s=x=>x.toDateString();return s(d)===s(t)?'Today':s(d)===s(y)?'Yesterday':d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:d.getFullYear()===t.getFullYear()?undefined:'numeric'})};
   const clock=d=>d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
@@ -1846,18 +1859,19 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       HANDLES[r.other.id]=r.other.handle;PNAME[r.other.id]=r.other.name;
       $('#chAv').src=FACE(r.other.avatar);$('#chName').textContent=r.other.name;
       chInput.value='';chInputFit();setCtx(null);chPaintReq();chRender('bottom');chSoldBar();
-      raiseOv(chatView);chatView.classList.add('open');chatView.setAttribute('aria-hidden','false');
+      if(isWide()&&curPage!=='messages'){prevPage=curPage;setPage('messages');try{history.pushState(null,'','/messages');navDepth++}catch(e){}}
+      raiseOv(chatView);chatView.classList.add('open');chatView.setAttribute('aria-hidden','false');placeChat();
       setTimeout(()=>{if(CH&&CH.conv===id)chScroll.scrollTop=chScroll.scrollHeight},80);
       paintMsgBadge(r.unread);
       const it=MS.items.find(x=>x.id===id);if(it&&it.unread){it.unread=false;paintMsList()}
-      if(!noPush)ovPush('/messages/'+id);
+      if(!noPush){if(isWide()&&/^\/messages\/[0-9a-f-]{36}$/.test(location.pathname)&&location.pathname!=='/messages/'+id){try{history.replaceState({ov:1},'','/messages/'+id)}catch(e){}}else ovPush('/messages/'+id)}
       pollLoop();
       if(isWide()&&r.canWrite)setTimeout(()=>chInput.focus(),120);
     }).catch(()=>{fail('Could not open that chat');ovMissing()});
   }
   function closeChat(){
     chatView.classList.remove('open');chatView.setAttribute('aria-hidden','true');
-    closeBSheet(qrSheet);setTimeout(()=>pollLoop(),0);
+    closeBSheet(qrSheet);placeChat();setTimeout(()=>pollLoop(),0);
     if(curPage==='messages')refreshConvs();
   }
   // start (or continue) a chat with someone and open it; `o` can carry a first message about a room or product
@@ -2075,7 +2089,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
         if(incoming){blip();rpc('mark_conversation_read',{p_conv:cv.conv}).then(paintMsgBadge).catch(()=>{})}
         else paintMsgBadge(r.unread);
       }else paintMsgBadge(r.unread);
-      if(fresh){showToast('💬 New message');blip()}
+      if(fresh){if(alertsOn())showToast('💬 New message');blip()}
       if(r.items.length&&curPage==='messages')refreshConvs();
     }).catch(()=>{});
   }
@@ -3308,7 +3322,7 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const pwSheet=$('#pwSheet'),logoutSheet=$('#logoutSheet'),deleteSheet=$('#deleteSheet'),stBody=$('#stBody'),stScroll=$('#stScroll'),userMenu=$('#userMenu');
   let SET=INITIAL_SETTINGS||null;
   // setting name in the page  ->  column name in the database
-  const SKEY={privateAccount:'private_account',showActivity:'show_activity',notifyLikes:'notify_likes',notifyComments:'notify_comments',notifyLinks:'notify_links',notifyRooms:'notify_rooms',notifyPrices:'notify_prices',notifyEmail:'notify_email',whoCanMessage:'who_can_message',language:'language'};
+  const SKEY={privateAccount:'private_account',showActivity:'show_activity',notifyLikes:'notify_likes',notifyComments:'notify_comments',notifyLinks:'notify_links',notifyRooms:'notify_rooms',notifyPrices:'notify_prices',notifyEmail:'notify_email',whoCanMessage:'who_can_message',language:'language',theme:'theme',textSize:'text_size',reduceMotion:'reduce_motion',dataSaver:'data_saver',notifyMessages:'notify_messages',quietEnabled:'quiet_enabled',quietFrom:'quiet_from',quietTo:'quiet_to'};
   const LANGS=[['en','English'],['rw','Kinyarwanda'],['fr','Français']];
   const WHO=[['everyone','Everyone'],['links','My links'],['nobody','No one']];
   const swRow=(k,icon,tone,t,d)=>'<div class="st-row tap" data-sw="'+k+'" role="switch" tabindex="0" aria-checked="'+!!SET[k]+'"><span class="st-ic '+tone+'"><i class="fa-solid '+icon+'"></i></span><span class="st-t"><b>'+t+'</b><small>'+d+'</small></span><span class="st-sw'+(SET[k]?' on':'')+'"></span></div>';
@@ -3321,12 +3335,35 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   const CATS=[
     ['account','fa-user','y','Account','Profile, email and password'],
     ['privacy','fa-lock','b','Privacy','Private account, activity and messages'],
+    ['appearance','fa-palette','g','Appearance','Dark mode, text size and motion'],
     ['messages','fa-comment-dots','y','Messages','Read receipts, last seen, sounds, blocked people'],
-    ['notifications','fa-bell','r','Notifications','Likes, comments, links and rooms'],
+    ['notifications','fa-bell','r','Notifications','Alerts, quiet hours and what you hear about'],
     ['language','fa-globe','g','Language','Choose the app language'],
-    ['help','fa-circle-question','b','Help and about','Support, safety and terms'],
+    ['data','fa-database','b','Your data','Download your data, data saver, hidden posts'],
+    ['help','fa-circle-question','b','Help and about','Help, safety, terms and send feedback'],
     ['login','fa-right-from-bracket','r','Log out or delete','Sign out or remove your account']
   ];
+  // ---- how the app looks and behaves for this person (saved in the database, remembered on this device for a flash-free start) ----
+  const darkMQ=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+  function applyLook(s){
+    if(!s||!s.theme)return;
+    const d=document.documentElement;
+    const t=s.theme==='system'?(darkMQ&&darkMQ.matches?'dark':'light'):s.theme;
+    d.dataset.theme=t;d.dataset.ts=s.textSize||'normal';d.dataset.rm=s.reduceMotion?'1':'0';
+    d.lang=s.language||'en';
+    setDataSaver(!!s.dataSaver);
+    try{localStorage.setItem('ghetto.look',JSON.stringify({theme:s.theme,ts:s.textSize,rm:!!s.reduceMotion}))}catch(e){}
+  }
+  if(darkMQ&&darkMQ.addEventListener)darkMQ.addEventListener('change',()=>{if(SET&&SET.theme==='system')applyLook(SET)});
+  if(SET)applyLook(SET);else rpc('get_settings').then(s=>{if(!SET){SET=s;applyLook(s)}}).catch(()=>{});
+  // message alerts: off completely, or silent during quiet hours
+  function inQuiet(){
+    if(!SET||!SET.quietEnabled)return false;
+    const n=new Date(),m=n.getHours()*60+n.getMinutes(),f=x=>{const a=String(x).split(':');return (+a[0])*60+(+a[1])};
+    const a=f(SET.quietFrom),b=f(SET.quietTo);
+    return a<=b?(m>=a&&m<b):(m>=a||m<b);
+  }
+  alertsOn=()=>!(SET&&SET.notifyMessages===false)&&!inQuiet();
   let stCat='account';
   function stSection(k){
     const s=SET;
@@ -3338,6 +3375,14 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
         swRow('privateAccount','fa-lock','b','Private account','Only people linked with you can see your posts')+
         swRow('showActivity','fa-circle','g','Activity status','Let people see when you are active')+
         segRow('whoCanMessage','fa-comment-dots','y','Who can message you','Choose who may start a chat with you',WHO);
+    if(k==='appearance')return ''+
+        segRow('theme','fa-circle-half-stroke','g','Theme','Light, dark, or follow your phone',[['system','Auto'],['light','Light'],['dark','Dark']])+
+        segRow('textSize','fa-text-height','b','Text size','Make everything a little smaller or bigger',[['small','Small'],['normal','Normal'],['large','Large']])+
+        swRow('reduceMotion','fa-wind','y','Calmer motion','Turn off sliding and bouncing animations');
+    if(k==='data')return ''+
+        swRow('dataSaver','fa-leaf','g','Data saver','Send smaller photos so uploads use less data')+
+        linkRow('export','fa-download','b','Download my data','Posts, comments, rooms, products and messages you sent')+
+        linkRow('unhide','fa-eye','y','Show hidden posts again','Bring back posts you chose Not interested on');
     if(k==='messages')return ''+
         msSw('read_receipts','fa-check-double','b','Read receipts','Show blue ticks. If off, you will not see them from others either')+
         msSw('show_last_active','fa-clock','g','Last active','Show when you were last online. If off, you will not see it from others either')+
@@ -3350,18 +3395,23 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
         swRow('notifyLinks','fa-user-plus','g','New links','When someone links with you')+
         swRow('notifyRooms','fa-building','y','Room updates','Visit requests and messages about your rooms')+
         swRow('notifyPrices','fa-tags','y','Price updates','Market price changes near you')+
-        swRow('notifyEmail','fa-envelope','b','Email notifications','Also send important updates to your email');
+        swRow('notifyMessages','fa-comment-dots','y','Message alerts','The pop-up and sound when a message arrives')+
+        swRow('quietEnabled','fa-moon','b','Quiet hours','No pop-ups or sounds during these hours')+
+        (s.quietEnabled?'<div class="st-row st-times"><span class="st-t"><b>From</b></span><input type="time" class="st-time" data-time="quietFrom" value="'+esc(s.quietFrom)+'" aria-label="Quiet from"><span class="st-t"><b>To</b></span><input type="time" class="st-time" data-time="quietTo" value="'+esc(s.quietTo)+'" aria-label="Quiet to"></div>':'')+
+        swRow('notifyEmail','fa-envelope','b','Email notifications','Saved now. Emails start when email sending is switched on');
     if(k==='language')return segRow('language','fa-globe','g','App language','Translations are coming soon',LANGS);
     if(k==='help')return ''+
-        linkRow('help','fa-circle-question','b','Help centre','')+
+        linkRow('help','fa-circle-question','b','Help centre','Answers to common questions')+
+        linkRow('feedback','fa-paper-plane','y','Send feedback','Report a problem or share an idea')+
         linkRow('safety','fa-shield-halved','g','Safety tips','Visit first, never pay before you meet the landlord')+
         linkRow('terms','fa-file-lines','y','Terms and privacy','')+
         linkRow('about','fa-circle-info','b','About Ghetto','Version 0.1');
     return ''+
         linkRow('logout','fa-right-from-bracket','r','Log out','Signed in as '+esc(s.email||'@'+s.handle))+
+        linkRow('logoutall','fa-laptop','r','Log out of all devices','Signs you out everywhere, including this device')+
         linkRow('delete','fa-trash','r','Delete account','Remove your profile and everything you posted','','danger');
   }
-  const stTitle=k=>({account:'Your account',privacy:'Privacy',messages:'Messages',notifications:'Notifications',language:'Language',help:'Help and about',login:'Login'}[k]);
+  const stTitle=k=>({account:'Your account',privacy:'Privacy',appearance:'Appearance',data:'Your data',messages:'Messages',notifications:'Notifications',language:'Language',help:'Help and about',login:'Login'}[k]);
   function renderSettings(){
     const rs=$('#rSettings');
     if(!SET){stBody.innerHTML='<div class="d-empty">Loading settings…</div>';if(rs)rs.innerHTML='';return}
@@ -3395,8 +3445,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
   }
 
   function saveSetting(k,v){
-    const old=SET[k];SET[k]=v;
-    return rpc('update_setting',{p_key:SKEY[k],p_value:v}).catch(()=>{SET[k]=old;renderSettings();fail('Could not save that setting')});
+    const old=SET[k];SET[k]=v;applyLook(SET);
+    return rpc('update_setting',{p_key:SKEY[k],p_value:v}).catch(()=>{SET[k]=old;applyLook(SET);renderSettings();fail('Could not save that setting')});
   }
   function stClick(e){
     const cat=e.target.closest('[data-cat]');
@@ -3414,6 +3464,8 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
       saveSetting(k,on);
       const t=$('.st-sw',sw);t.classList.toggle('on',on);sw.setAttribute('aria-checked',String(on));
       if(k==='privateAccount')showToast(on?'Private account on 🔒':'Private account off');
+      else if(k==='quietEnabled')renderSettings();
+      else if(k==='dataSaver')showToast(on?'Data saver on 🍃':'Data saver off');
       return;
     }
     const sg=e.target.closest('.st-seg button');
@@ -3434,16 +3486,61 @@ export function initGhetto(DATA, INITIAL_PROFILE, INITIAL_SETTINGS) {
     else if(act==='qr')openQr(null);
     else if(act==='logout')openLogout();
     else if(act==='delete')openDelete();
-    else if(act==='help')showToast('Help centre is coming soon 🙋');
-    else if(act==='safety')showToast('Visit the room and meet the landlord before you pay 🛡️');
-    else if(act==='terms')showToast('Terms and privacy page is coming soon 📄');
-    else if(act==='about')showToast('Ghetto 0.1 · Live. Learn. Grow... 🧡');
+    else if(act==='help'||act==='safety'||act==='terms'||act==='about')openInfo(act);
+    else if(act==='feedback')openFeedback();
+    else if(act==='export')exportData(a);
+    else if(act==='unhide')unhidePosts(a);
+    else if(act==='logoutall')logoutAll();
   }
+  const stTime=e=>{const t=e.target.closest('[data-time]');if(t&&/^\d\d:\d\d$/.test(t.value)){saveSetting(t.dataset.time,t.value);showToast('Saved ✅')}};
+  stBody.addEventListener('change',stTime);$('#rSettings').addEventListener('change',stTime);
   stBody.addEventListener('click',stClick);
   $('#rSettings').addEventListener('click',stClick);
   const stKey=e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sw],[data-msw],.st-who')){e.preventDefault();e.target.click()}};
   stBody.addEventListener('keydown',stKey);$('#rSettings').addEventListener('keydown',stKey);
   if(wideMQ&&wideMQ.addEventListener)wideMQ.addEventListener('change',()=>{if(curPage==='settings')renderSettings();updateRail();renderRailProfile()});
+
+  // ---- help, safety, terms, about (written here so they work offline) ----
+  const INFO={
+    help:['Help centre',[['How do I find a room?','Open Rooms, use the filter button to pick your area, price and facilities, then tap a room to see photos and contact the landlord.'],['How do I post a room?','Rooms are posted by landlords and commissioners. Pick Landlord or Commissioner in Edit profile, then use Create and choose Room.'],['How do I sell something?','Anyone can sell. Tap Create, choose Product, add photos and a price. Buyers message you from the product page.'],['Someone is bothering me','Open their chat, tap the three dots and choose Block or Report. You can also report any post, comment, room or product from its three dots.'],['I forgot my password','On the login page choose "Forgot password" and we send a reset link to your email.']]],
+    safety:['Safety tips',[['Visit first','Always see the room and meet the landlord or commissioner before you pay anything.'],['Pay safely','Never send money in advance to someone you have not met. Ghetto never asks you for money in chat.'],['Meet in public','Meet buyers and sellers in a busy public place and bring a friend if you can.'],['Keep your details private','Do not share your PIN, password or ID photos in chat.'],['Report scams','If something feels wrong, use Report. It helps keep everyone safe.']]],
+    terms:['Terms and privacy',[['Your content','You own what you post. You allow Ghetto to show it to other people in the app.'],['Be respectful','No scams, harassment, hate or illegal items. We may remove content or accounts that break these rules.'],['Your data','We store your profile, posts, messages and settings so the app works. You can download your data or delete your account any time in Settings.'],['Photos','Photos are shrunk on your phone before upload. Location data in photos is removed.'],['Contact','Use Send feedback in Settings for any question about these terms.']]],
+    about:['About Ghetto',[['Ghetto 0.2','Live. Learn. Grow... Student housing and community for Nyabugogo and beyond.'],['Made with care','Built by an independent developer in Rwanda.']]]
+  };
+  function openInfo(k){
+    const d=INFO[k];$('#infTitle').textContent=d[0];
+    $('#infBody').innerHTML=d[1].map(x=>'<details class="inf-q"'+(k!=='help'?' open':'')+'><summary>'+esc(x[0])+'</summary><p>'+esc(x[1])+'</p></details>').join('');
+    openBSheet($('#infoSheet'));
+  }
+  let fbKind='problem';
+  function openFeedback(){fbKind='problem';$('#fbText').value='';$('#fbErr').textContent='';$$('#fbKinds button').forEach(b=>b.classList.toggle('on',b.dataset.k===fbKind));openBSheet($('#fbSheet'));setTimeout(()=>$('#fbText').focus(),350)}
+  $('#fbKinds').addEventListener('click',e=>{const b=e.target.closest('[data-k]');if(!b)return;fbKind=b.dataset.k;$$('#fbKinds button').forEach(x=>x.classList.toggle('on',x===b))});
+  $('#fbSend').addEventListener('click',()=>{
+    const t=$('#fbText').value.trim(),btn=$('#fbSend');$('#fbErr').textContent='';
+    if(t.length<5){$('#fbErr').textContent='Please write a little more';return}
+    btn.disabled=true;
+    rpc('submit_feedback',{p_kind:fbKind,p_body:t}).then(()=>{closeBSheet($('#fbSheet'));showToast('Thank you, we got it 🧡')}).catch(e=>{$('#fbErr').textContent=epErr(e)}).finally(()=>{btn.disabled=false});
+  });
+  $$('#infoSheet,#fbSheet').forEach(sh=>sh.addEventListener('click',e=>{if(e.target.closest('.bs-back,.bs-close'))closeBSheet(sh)}));
+  function exportData(btn){
+    btn.disabled=true;
+    rpc('export_my_data').then(d=>{
+      const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'}),a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);a.download='ghetto-my-data.json';document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href),4000);showToast('Your data is downloading 📥');
+    }).catch(()=>fail('Could not prepare your data')).finally(()=>{btn.disabled=false});
+  }
+  function unhidePosts(btn){
+    btn.disabled=true;
+    rpc('reset_hidden_posts').then(n=>showToast(n?n+' hidden post'+(n>1?'s':'')+' will show again on Home 👀':'You have no hidden posts')).catch(()=>fail('Could not do that')).finally(()=>{btn.disabled=false});
+  }
+  async function logoutAll(){
+    const ok=await confirmBox({title:'Log out of all devices?',text:'You will be signed out here and everywhere else. You can log back in any time.',ok:'Log out everywhere'});
+    if(!ok)return;
+    try{await supabase().auth.signOut({scope:'global'})}catch(e){}
+    try{localStorage.removeItem('ghetto.look')}catch(e){}
+    location.href='/login';
+  }
 
   // ---- change password ----
   function openPassword(){$('#pwNew').value='';$('#pwNew2').value='';$('#pwErr').textContent='';openBSheet(pwSheet);setTimeout(()=>$('#pwNew').focus(),350)}

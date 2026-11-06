@@ -161,3 +161,17 @@ Run `supabase/migrations/0013_messaging_plus.sql` (and the small fix `0013b_poll
 - Settings > Messages: read receipts, last active, sounds (turning receipts or last active off hides them both ways).
 - Business: quick replies (saved on the device), "Mark as sold" strip in a product chat, send a photo, "Send in a chat" in the room and product menus.
 - Live: the open chat asks the server every 2 s (the chat list every 5 s, elsewhere every 20 s). Push or email alerts when the app is closed need a separate sending service and are not included.
+
+## Desktop messages and Settings (migration 0014, applied)
+
+**Desktop messages (1100px and wider):** the chat list sits in the middle column. Click a chat and it opens in the right column, with no overlay. The address follows the chat (`/messages/<id>`), Back closes it, and reloading keeps it open. Phones are unchanged.
+
+**Settings** are saved per user in the database (`user_settings`). On desktop the categories are in the middle and the selected one opens on the right.
+- Account, Privacy (including Activity status, which now really hides your last-online time), Messages, Notifications, Language, Login
+- Appearance: theme (Auto, Light, Dark), text size, reduce motion. Applied before the page paints, so there is no flash.
+- Notifications: message alerts and quiet hours (mutes sounds and toasts)
+- Your data: data saver (smaller photo uploads), download my data (JSON), show hidden posts again
+- Help: FAQ, Safety, Terms, About, and a feedback form (saved in `feedback`)
+- Login: log out of all devices
+
+Known limits: Language only sets the page language (no translations yet). The email-notifications switch is saved, but nothing sends email yet. Messages use polling (every 2 to 5 seconds), not realtime. Dark mode inverts colours and is a beta.

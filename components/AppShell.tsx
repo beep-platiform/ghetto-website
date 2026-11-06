@@ -26,6 +26,7 @@ import ProductDetail from './ProductDetail';
 import MessagesPage from './MessagesPage';
 import ChatView from './ChatView';
 import ChatSheets from './ChatSheets';
+import InfoSheets from './InfoSheets';
 import type { AppData, Profile, Settings } from '../lib/types';
 
 /**
@@ -61,6 +62,7 @@ export default function AppShell({ page, data, profile, settings }: { page: 'hom
           <ProductDetail />
           <ChatView />
           <ChatSheets />
+          <InfoSheets />
           <FilterSheet />
           <ContactSheet />
           <ProfileSheets />
